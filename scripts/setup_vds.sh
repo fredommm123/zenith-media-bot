@@ -2,6 +2,7 @@
 
 # ============================================
 # ZenithMedia Bot - Автоматическая установка на Ubuntu VDS
+# Поддерживает Ubuntu 20.04, 22.04, 24.04
 # ============================================
 
 set -e  # Остановка при ошибке
@@ -40,17 +41,24 @@ source /etc/os-release
 if [[ "$ID" != "ubuntu" ]]; then
     warning "Этот скрипт предназначен для Ubuntu, но попробуем продолжить..."
 fi
+echo "✓ Обнаружена Ubuntu ${VERSION_ID}"
 
-# Получаем текущего пользователя и домашнюю директорию
-CURRENT_USER=${SUDO_USER:-$USER}
-if [ "$CURRENT_USER" = "root" ]; then
-    error "Не запускайте скрипт напрямую от root. Используйте: sudo ./setup_vds.sh"
+# Определяем текущую директорию (где лежит скрипт)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
+SERVICE_NAME="zenithmedia-bot"
+
+# Получаем пользователя
+if [ "$EUID" -ne 0 ]; then
+    error "Запустите скрипт с sudo: sudo ./setup_vds.sh"
     exit 1
 fi
 
-HOME_DIR=$(eval echo ~$CURRENT_USER)
-PROJECT_DIR="$HOME_DIR/zenithmedia_bot"
-SERVICE_NAME="zenithmedia-bot"
+CURRENT_USER=${SUDO_USER:-$USER}
+if [ "$CURRENT_USER" = "root" ]; then
+    # Если запущено напрямую от root, используем владельца директории
+    CURRENT_USER=$(stat -c '%U' "$PROJECT_DIR")
+fi
 
 echo "📁 Директория проекта: $PROJECT_DIR"
 echo "👤 Пользователь: $CURRENT_USER"
@@ -76,24 +84,25 @@ echo "📚 Установка системных зависимостей..."
 apt-get install -y git curl wget ffmpeg
 success "Системные зависимости установлены"
 
-# 4. Создание директории проекта
-if [ ! -d "$PROJECT_DIR" ]; then
-    echo "📂 Создание директории проекта..."
-    mkdir -p "$PROJECT_DIR"
-    chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR"
-    success "Директория создана"
-else
-    warning "Директория $PROJECT_DIR уже существует"
+# 4. Проверка структуры проекта
+if [ ! -f "$PROJECT_DIR/bot.py" ]; then
+    error "Файл bot.py не найден в $PROJECT_DIR"
+    error "Убедитесь, что все файлы загружены на сервер"
+    exit 1
 fi
 
-# 5. Копирование файлов (если запускается из другой директории)
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-if [ "$SCRIPT_DIR" != "$PROJECT_DIR" ]; then
-    echo "📋 Копирование файлов проекта..."
-    cp -r "$SCRIPT_DIR"/* "$PROJECT_DIR/"
-    chown -R $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR"
-    success "Файлы скопированы"
+if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
+    error "Файл requirements.txt не найден"
+    exit 1
 fi
+
+success "Структура проекта проверена"
+
+# 5. Установка прав на файлы
+echo "🔐 Установка прав доступа..."
+chown -R $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR"
+chmod +x "$PROJECT_DIR"/scripts/*.sh 2>/dev/null || true
+success "Права установлены"
 
 # 6. Создание виртуального окружения
 echo "🔧 Создание виртуального окружения..."
@@ -102,12 +111,14 @@ if [ ! -d "venv" ]; then
     sudo -u $CURRENT_USER python3 -m venv venv
     success "Виртуальное окружение создано"
 else
-    warning "Виртуальное окружение уже существует"
+    warning "Виртуальное окружение уже существует, пересоздаём..."
+    rm -rf venv
+    sudo -u $CURRENT_USER python3 -m venv venv
 fi
 
 # 7. Установка Python зависимостей
-echo "📦 Установка Python зависимостей..."
-sudo -u $CURRENT_USER bash -c "source venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"
+echo "📦 Установка Python зависимостей (это может занять несколько минут)..."
+sudo -u $CURRENT_USER bash -c "source venv/bin/activate && pip install --upgrade pip -q && pip install -r requirements.txt -q"
 success "Зависимости установлены"
 
 # 8. Проверка конфигурации
@@ -142,12 +153,16 @@ REFERRAL_PERCENT=10
 TIKTOK_PARSER_TEST_MODE=false
 EOF
         chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/.env"
-        success ".env файл создан"
+        chmod 600 "$PROJECT_DIR/.env"
+        success ".env файл создан и защищён"
     else
         warning "Не забудьте создать .env файл перед запуском!"
+        warning "Используйте: nano $PROJECT_DIR/.env"
     fi
 else
     success ".env файл найден"
+    chmod 600 "$PROJECT_DIR/.env"
+    chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/.env"
 fi
 
 # 9. Создание systemd service
