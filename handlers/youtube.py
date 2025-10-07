@@ -7,14 +7,14 @@ import hashlib
 import secrets
 from datetime import datetime
 
-from database import Database
-from keyboards import cancel_keyboard, tiktok_verification_keyboard
-from youtube_parser import (
+from core.database import Database
+from core.keyboards import cancel_keyboard, tiktok_verification_keyboard
+from parsers.youtube_parser import (
     validate_youtube_url, 
     parse_youtube_channel,
     normalize_youtube_url
 )
-import config
+from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)

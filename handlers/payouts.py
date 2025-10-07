@@ -7,11 +7,11 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 
-from database import Database
-from crypto_pay import send_payment, calculate_usdt_amount
-import config
-from keyboards import admin_payout_keyboard
-from utils import send_to_admin_chat
+from core.database import Database
+from core.crypto_pay import send_payment, calculate_usdt_amount
+from core import config
+from core.keyboards import admin_payout_keyboard
+from core.utils import send_to_admin_chat
 
 logger = logging.getLogger(__name__)
 

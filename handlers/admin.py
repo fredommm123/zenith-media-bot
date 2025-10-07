@@ -4,11 +4,11 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from database import Database
-from keyboards import admin_keyboard, withdrawal_action_keyboard
-from utils import format_currency, format_timestamp, get_status_text
-from crypto_pay import check_transfer_settings, get_app_balance, create_invoice, get_invoice_status
-import config
+from core.database import Database
+from core.keyboards import admin_keyboard, withdrawal_action_keyboard
+from core.utils import format_currency, format_timestamp, get_status_text
+from core.crypto_pay import check_transfer_settings, get_app_balance, create_invoice, get_invoice_status
+from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)
@@ -314,7 +314,7 @@ async def approve_video(callback: CallbackQuery):
         
         # Рассчитываем выплату
         from handlers.payouts import calculate_payout_amount
-        from keyboards import video_payout_keyboard
+        from core.keyboards import video_payout_keyboard
         
         views = video['views']
         payout_amount = await calculate_payout_amount(views, platform, video['user_id'], video_id)
@@ -423,7 +423,7 @@ async def admin_tiers_menu(callback: CallbackQuery, state: FSMContext):
         f"<code>/set_tier 7916638098 gold</code>"
     )
     
-    from keyboards import admin_keyboard
+    from core.keyboards import admin_keyboard
     await callback.message.edit_text(tier_text, reply_markup=admin_keyboard(), parse_mode="HTML")
     await callback.answer()
 
@@ -465,7 +465,7 @@ async def admin_topup_menu(callback: CallbackQuery, state: FSMContext):
         f"<code>/check_invoice &lt;invoice_id&gt;</code>"
     )
     
-    from keyboards import admin_keyboard
+    from core.keyboards import admin_keyboard
     await callback.message.edit_text(topup_text, reply_markup=admin_keyboard(), parse_mode="HTML")
     await callback.answer()
 

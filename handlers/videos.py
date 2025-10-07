@@ -4,14 +4,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import asyncio
 
-from database import Database
-from keyboards import (
+from core.database import Database
+from core.keyboards import (
     cancel_keyboard,
     pagination_keyboard
 )
-from utils import format_currency, format_timestamp, get_status_emoji, get_status_text, calculate_pages
-from tiktok_parser import validate_tiktok_video, extract_tiktok_video_id
-import config
+from core.utils import format_currency, format_timestamp, get_status_emoji, get_status_text, calculate_pages
+from parsers.tiktok_parser import validate_tiktok_video, extract_tiktok_video_id
+from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)
@@ -79,7 +79,7 @@ async def submit_tiktok_video_callback(callback: CallbackQuery, state: FSMContex
 @router.message(F.text == "🎬 Подать ролик")
 async def submit_video_start(message: Message, state: FSMContext):
     """Начать подачу ролика - выбор платформы"""
-    from keyboards import video_platform_keyboard
+    from core.keyboards import video_platform_keyboard
     
     # Проверяем привязанные платформы
     tiktok = await db.get_user_tiktok(message.from_user.id)
@@ -282,8 +282,8 @@ async def submit_video_url(message: Message, state: FSMContext):
         )
         
         # Уведомляем администраторов с кнопками управления
-        from keyboards import video_moderation_keyboard
-        from utils import send_to_admin_chat
+        from core.keyboards import video_moderation_keyboard
+        from core.utils import send_to_admin_chat
         
         await send_to_admin_chat(
             message.bot,

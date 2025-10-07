@@ -1,9 +1,9 @@
 ﻿from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
-from database import Database
-from utils import format_currency
-import config
+from core.database import Database
+from core.utils import format_currency
+from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)

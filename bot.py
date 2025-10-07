@@ -5,10 +5,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 from typing import Callable, Dict, Any, Awaitable
 
-import config
-from database import Database
+from core import config
+from core.database import Database
 from handlers import profile, videos, payments, referral, help, admin, tiktok, youtube, youtube_videos, payouts, admin_settings
-from crypto_pay import test_crypto_connection, close_crypto_session
+from core.crypto_pay import test_crypto_connection, close_crypto_session
 
 # Настройка логирования
 logging.basicConfig(

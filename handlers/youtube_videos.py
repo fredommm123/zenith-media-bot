@@ -5,15 +5,15 @@ from aiogram.fsm.state import State, StatesGroup
 import logging
 from datetime import datetime
 
-from database import Database
-from keyboards import cancel_keyboard
-from youtube_video_parser import (
+from core.database import Database
+from core.keyboards import cancel_keyboard
+from parsers.youtube_video_parser import (
     validate_youtube_video_url,
     parse_youtube_video,
     extract_video_id,
     is_video_fresh
 )
-import config
+from core import config
 
 logger = logging.getLogger(__name__)
 
@@ -245,8 +245,8 @@ async def receive_youtube_video_url(message: Message, state: FSMContext):
     
     # Уведомляем администратора в админ-чат
     try:
-        from utils import send_to_admin_chat
-        from keyboards import video_moderation_keyboard, first_youtube_video_keyboard
+        from core.utils import send_to_admin_chat
+        from core.keyboards import video_moderation_keyboard, first_youtube_video_keyboard
         
         user = await db.get_user(message.from_user.id)
         
@@ -261,7 +261,7 @@ async def receive_youtube_video_url(message: Message, state: FSMContext):
             await db.update_video_earnings(video_id, user_rate)
             
             # Автоматически выплачиваем
-            from crypto_pay import send_payment, calculate_usdt_amount
+            from core.crypto_pay import send_payment, calculate_usdt_amount
             
             # Отправляем платеж
             payment_result = await send_payment(

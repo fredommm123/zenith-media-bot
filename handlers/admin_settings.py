@@ -5,10 +5,10 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database import Database
-from config import ADMIN_IDS
+from core.database import Database
+from core.config import ADMIN_IDS
 
-from utils import send_to_admin_chat
+from core.utils import send_to_admin_chat
 import logging
 
 logger = logging.getLogger(__name__)
@@ -230,7 +230,7 @@ async def process_youtube_rate(message: Message, state: FSMContext):
         try:
             if admin_message_id:
                 # Пытаемся обновить существующее сообщение
-                from utils import send_to_admin_chat
+                from core.utils import send_to_admin_chat
                 await send_to_admin_chat(
                     message.bot,
                     updated_admin_text,
@@ -243,7 +243,7 @@ async def process_youtube_rate(message: Message, state: FSMContext):
         
         # Уведомляем пользователя
         try:
-            from keyboards import video_payout_keyboard
+            from core.keyboards import video_payout_keyboard
             
             await message.bot.send_message(
                 user_id,

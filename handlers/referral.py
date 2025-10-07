@@ -1,10 +1,10 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
-from database import Database
-from keyboards import referral_keyboard
-from utils import format_currency, generate_referral_link
-import config
+from core.database import Database
+from core.keyboards import referral_keyboard
+from core.utils import format_currency, generate_referral_link
+from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)

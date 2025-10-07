@@ -33,8 +33,8 @@ scp -r C:\Users\dariu_2\OneDrive\Рабочий стол\zenithmedia_bot your_us
 
 ```bash
 cd zenithmedia_bot
-chmod +x setup_vds.sh
-sudo ./setup_vds.sh
+chmod +x scripts/setup_vds.sh
+sudo ./scripts/setup_vds.sh
 ```
 
 Скрипт автоматически:

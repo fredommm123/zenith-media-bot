@@ -92,8 +92,8 @@ git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
 cd YOUR_REPO
 
 # Запустить автоустановку
-chmod +x setup_vds.sh
-sudo ./setup_vds.sh
+chmod +x scripts/setup_vds.sh
+sudo ./scripts/setup_vds.sh
 ```
 
 ## 🔄 Обновление на VDS

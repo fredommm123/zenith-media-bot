@@ -10,9 +10,9 @@ import re
 import logging
 import asyncio
 
-from database import Database
-from keyboards import cancel_keyboard, tiktok_verification_keyboard
-import config
+from core.database import Database
+from core.keyboards import cancel_keyboard, tiktok_verification_keyboard
+from core import config
 
 logger = logging.getLogger(__name__)
 
@@ -533,7 +533,7 @@ async def confirm_bio_button(callback: CallbackQuery, state: FSMContext):
                 )
                 
                 # Уведомляем админов об успешной автоверификации
-                from utils import send_to_admin_chat
+                from core.utils import send_to_admin_chat
                 await send_to_admin_chat(
                     callback.bot,
                     f"✅ <b>Автоматическая верификация TikTok</b>\n\n"
@@ -593,7 +593,7 @@ async def confirm_bio_button(callback: CallbackQuery, state: FSMContext):
             )
         
         # Уведомляем админов об ошибке
-        from utils import send_to_admin_chat
+        from core.utils import send_to_admin_chat
         await send_to_admin_chat(
             callback.bot,
             f"🔔 <b>Заявка TikTok (ошибка парсинга)</b>\n\n"

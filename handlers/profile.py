@@ -4,12 +4,12 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from database import Database
-from keyboards import (
+from core.database import Database
+from core.keyboards import (
     main_menu_keyboard, profile_keyboard, confirm_keyboard, cancel_keyboard
 )
-from utils import format_currency
-import config
+from core.utils import format_currency
+from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)
@@ -25,7 +25,7 @@ async def cmd_start(message: Message, state: FSMContext):
     # Проверяем реферальный код
     referrer_id = None
     if message.text and len(message.text.split()) > 1:
-        from utils import parse_referral_code
+        from core.utils import parse_referral_code
         referrer_id = parse_referral_code(message.text.split()[1])
     
     if not user:
@@ -80,7 +80,7 @@ async def show_profile(message: Message):
     else:
         youtube_text = "Не привязан"
     
-    from utils import generate_referral_link
+    from core.utils import generate_referral_link
     bot_username = (await message.bot.me()).username
     referral_link = generate_referral_link(bot_username, message.from_user.id)
     
@@ -133,7 +133,7 @@ async def back_to_profile(callback: CallbackQuery):
     else:
         youtube_text = "Не привязан"
     
-    from utils import generate_referral_link
+    from core.utils import generate_referral_link
     bot_username = (await callback.bot.me()).username
     referral_link = generate_referral_link(bot_username, callback.from_user.id)
     
