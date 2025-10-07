@@ -9,6 +9,7 @@ from core import config
 from core.database import Database
 from handlers import profile, videos, payments, referral, help, admin, tiktok, youtube, youtube_videos, payouts, admin_settings
 from core.crypto_pay import test_crypto_connection, close_crypto_session
+from core.backup import backup_manager
 
 # Настройка логирования
 logging.basicConfig(
@@ -63,10 +64,14 @@ async def main():
     
     logger.info("Bot started")
     
+    # Запуск автоматического бэкапа в фоне
+    backup_task = asyncio.create_task(backup_manager.start_auto_backup())
+    
     # Запуск бота
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        backup_task.cancel()  # Останавливаем бэкап при выключении
         await close_crypto_session()
         await bot.session.close()
 

@@ -30,11 +30,15 @@ ENV/
 env.bak/
 venv.bak/
 
-# Database
-*.db
-*.db-journal
+# Database (но НЕ бэкапы)
+bot_database.db
+bot_database.db-journal
 *.sqlite
 *.sqlite3
+
+# Разрешаем бэкапы
+!backups/
+!backups/*.db
 
 # Environment variables
 .env
