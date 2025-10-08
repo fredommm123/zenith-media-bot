@@ -79,6 +79,13 @@ else
     success "Python установлен (версия $PYTHON_VERSION)"
 fi
 
+# Установка python3-venv для конкретной версии (Ubuntu 24.04+)
+PYTHON_VENV_PKG="python${PYTHON_VERSION}-venv"
+if ! dpkg -l | grep -q "$PYTHON_VENV_PKG"; then
+    echo "Установка $PYTHON_VENV_PKG..."
+    apt-get install -y "$PYTHON_VENV_PKG" || apt-get install -y python3-venv
+fi
+
 # 3. Установка дополнительных зависимостей
 echo "📚 Установка системных зависимостей..."
 apt-get install -y git curl wget ffmpeg

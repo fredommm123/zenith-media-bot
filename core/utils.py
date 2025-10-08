@@ -124,7 +124,7 @@ def get_status_text(status: str) -> str:
 
 async def send_to_admin_chat(bot, text: str, reply_markup=None, parse_mode="HTML", edit_message_id=None):
     """Отправить или обновить сообщение в админ-чате"""
-    import config
+    from core import config
     
     # Отправляем в админ-чат если указан
     if config.ADMIN_CHAT_ID:

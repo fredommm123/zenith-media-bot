@@ -81,6 +81,7 @@ async def get_tiktok_profile_bio(username: str) -> str:
     Автоматически парсит страницу
     """
     url = f"https://www.tiktok.com/@{username}"
+    logger.info(f"🔍 Начинаем парсинг био для @{username}")
     
     # Метод 1: Пробуем HTTP запрос (быстро)
     try:
@@ -94,47 +95,86 @@ async def get_tiktok_profile_bio(username: str) -> str:
             'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
         }
         
+        logger.info(f"📡 HTTP запрос к {url}")
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
+                    logger.info(f"✅ HTML загружен, размер: {len(html)} символов")
                     
-                    # Ищем данные в script тегах
+                    # Ищем данные в script тегах с SIGI_STATE
+                    for script in soup.find_all('script', {'id': 'SIGI_STATE'}):
+                        script_text = script.string or ''
+                        logger.info(f"🔎 Найден SIGI_STATE script, размер: {len(script_text)}")
+                        try:
+                            data = json.loads(script_text)
+                            logger.info(f"📦 JSON распарсен, ключи: {list(data.keys())}")
+                            
+                            # Ищем UserModule
+                            if 'UserModule' in data:
+                                user_module = data['UserModule']
+                                logger.info(f"👤 UserModule найден, ключи: {list(user_module.keys())}")
+                                
+                                # Ищем users
+                                if 'users' in user_module:
+                                    for user_id, user_data in user_module['users'].items():
+                                        logger.info(f"🆔 Пользователь {user_id}, ключи: {list(user_data.keys())}")
+                                        
+                                        # Проверяем все возможные поля с био
+                                        bio_fields = ['signature', 'desc', 'bioLink', 'bio']
+                                        for field in bio_fields:
+                                            if field in user_data and user_data[field]:
+                                                bio = user_data[field]
+                                                logger.info(f"✅ Bio найдено в поле '{field}': {bio}")
+                                                return bio
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка парсинга SIGI_STATE: {e}")
+                    
+                    # Ищем данные в обычных script тегах
                     for script in soup.find_all('script'):
                         script_text = script.string or ''
-                        if 'user' in script_text and 'signature' in script_text:
+                        if 'signature' in script_text or 'bioLink' in script_text:
+                            logger.info(f"🔎 Найден script с 'signature', размер: {len(script_text)}")
                             try:
-                                # Пытаемся найти JSON с данными пользователя
-                                json_match = re.search(r'{[^<>]*"signature"[^<>]*}', script_text)
-                                if json_match:
-                                    data = json.loads(json_match.group(0))
-                                    bio = data.get('signature', '')
-                                    if bio:
-                                        logger.info(f"Bio found via HTTP for @{username}: {bio[:50]}")
-                                        return bio
-                            except:
-                                continue
+                                # Ищем все JSON объекты в script
+                                json_matches = re.findall(r'\{[^{}]*"signature"[^{}]*\}', script_text)
+                                for json_str in json_matches:
+                                    try:
+                                        data = json.loads(json_str)
+                                        bio = data.get('signature', '')
+                                        if bio:
+                                            logger.info(f"✅ Bio найдено в script: {bio[:50]}")
+                                            return bio
+                                    except:
+                                        continue
+                            except Exception as e:
+                                logger.debug(f"⚠️ Не удалось распарсить script: {e}")
                     
                     # Также пробуем найти в meta тегах
                     meta_desc = soup.find('meta', {'name': 'description'})
                     if meta_desc and meta_desc.get('content'):
                         content = meta_desc.get('content', '')
+                        logger.info(f"📝 Meta description найден: {content[:100]}")
                         # В description часто есть био после имени пользователя
                         if content and len(content) > 10:
-                            logger.info(f"Bio found via meta for @{username}: {content[:50]}")
+                            logger.info(f"✅ Используем meta description как bio")
                             return content
+                    
+                    logger.warning(f"⚠️ Bio не найдено в HTTP методе")
         
     except Exception as e:
-        logger.warning(f"HTTP method failed for profile: {e}")
+        logger.error(f"❌ HTTP метод провалился: {e}")
     
     # Метод 2: Используем Playwright (медленнее, но надежнее)
+    logger.info("🎭 Пробуем Playwright метод")
     try:
         from playwright.async_api import async_playwright
         import asyncio
         
         async with async_playwright() as p:
             # Запускаем headless браузер
+            logger.info("🌐 Запускаем браузер Chromium")
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -162,11 +202,14 @@ async def get_tiktok_profile_bio(username: str) -> str:
             
             try:
                 # Переходим на страницу профиля с увеличенным таймаутом и другой стратегией
+                logger.info(f"🔗 Переход на {url}")
                 try:
                     await page.goto(url, timeout=60000, wait_until='domcontentloaded')
+                    logger.info("✅ Страница загружена (domcontentloaded)")
                 except Exception as e:
-                    logger.warning(f"domcontentloaded failed, trying load: {e}")
+                    logger.warning(f"⚠️ domcontentloaded failed, trying load: {e}")
                     await page.goto(url, timeout=60000, wait_until='load')
+                    logger.info("✅ Страница загружена (load)")
                 
                 # Ждем загрузки контента
                 await page.wait_for_timeout(2000)
@@ -181,18 +224,21 @@ async def get_tiktok_profile_bio(username: str) -> str:
                 ]
                 
                 bio_text = ""
+                logger.info(f"🔍 Проверяем {len(bio_selectors)} селекторов")
                 for selector in bio_selectors:
                     try:
                         element = await page.query_selector(selector)
                         if element:
                             bio_text = await element.inner_text()
                             if bio_text:
+                                logger.info(f"✅ Bio найдено через селектор '{selector}': {bio_text[:50]}")
                                 break
-                    except:
-                        continue
+                    except Exception as e:
+                        logger.debug(f"⚠️ Селектор '{selector}' не сработал: {e}")
                 
                 # Метод 2: Ищем в JSON-LD данных
                 if not bio_text:
+                    logger.info("🔍 Проверяем JSON-LD")
                     try:
                         json_ld = await page.query_selector('script[type="application/ld+json"]')
                         if json_ld:
@@ -200,37 +246,47 @@ async def get_tiktok_profile_bio(username: str) -> str:
                             content = await json_ld.inner_text()
                             data = json.loads(content)
                             bio_text = data.get('description', '')
-                    except:
-                        pass
+                            if bio_text:
+                                logger.info(f"✅ Bio найдено в JSON-LD: {bio_text[:50]}")
+                    except Exception as e:
+                        logger.debug(f"⚠️ JSON-LD не сработал: {e}")
                 
                 # Метод 3: Парсим весь HTML
                 if not bio_text:
+                    logger.info("🔍 Парсим весь HTML")
                     try:
                         html_content = await page.content()
                         soup = BeautifulSoup(html_content, 'html.parser')
                         
                         # Ищем все h2 теги
                         h2_tags = soup.find_all('h2')
-                        for h2 in h2_tags:
+                        logger.info(f"📝 Найдено {len(h2_tags)} h2 тегов")
+                        for i, h2 in enumerate(h2_tags):
                             text = h2.get_text(strip=True)
+                            logger.debug(f"  h2[{i}]: {text[:50] if text else 'empty'}")
                             if text and len(text) > 10 and len(text) < 500:
                                 bio_text = text
+                                logger.info(f"✅ Bio найдено в h2[{i}]: {bio_text[:50]}")
                                 break
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка парсинга HTML: {e}")
                 
                 await browser.close()
                 
-                print(f"[TikTok Parser] @{username} bio: {bio_text[:100] if bio_text else 'NOT FOUND'}")
+                if bio_text:
+                    logger.info(f"✅ [Playwright] @{username} bio: {bio_text[:100]}")
+                else:
+                    logger.warning(f"❌ [Playwright] @{username} bio: NOT FOUND")
+                
                 return bio_text
                 
             except Exception as e:
                 await browser.close()
-                print(f"Ошибка при парсинге страницы: {e}")
+                logger.error(f"❌ Ошибка при парсинге страницы: {e}")
                 return ""
                 
     except Exception as e:
-        print(f"Ошибка при получении профиля TikTok: {e}")
+        logger.error(f"❌ Ошибка Playwright метода: {e}")
         return ""
 
 
