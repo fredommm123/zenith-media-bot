@@ -240,13 +240,31 @@ class Database:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
-    async def update_user_balance(self, user_id: int, amount: float):
-        """Обновить баланс пользователя"""
+    async def update_user_balance(self, user_id: int, amount: float, operation: str = 'add'):
+        """
+        Обновить баланс пользователя
+        
+        Args:
+            user_id: ID пользователя
+            amount: Сумма изменения
+            operation: 'add' (добавить), 'subtract' (вычесть), 'set' (установить)
+        """
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
-            await db.execute(
-                "UPDATE users SET balance = balance + ? WHERE user_id = ?",
-                (amount, user_id)
-            )
+            if operation == 'add':
+                await db.execute(
+                    "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+                    (amount, user_id)
+                )
+            elif operation == 'subtract':
+                await db.execute(
+                    "UPDATE users SET balance = balance - ? WHERE user_id = ?",
+                    (amount, user_id)
+                )
+            elif operation == 'set':
+                await db.execute(
+                    "UPDATE users SET balance = ? WHERE user_id = ?",
+                    (amount, user_id)
+                )
             await db.commit()
 
     async def update_user_stats(self, user_id: int, videos: int = 0, views: int = 0):
@@ -258,6 +276,17 @@ class Database:
                        total_views = total_views + ? 
                    WHERE user_id = ?""",
                 (videos, views, user_id)
+            )
+            await db.commit()
+
+    async def update_user_stats_withdrawal(self, user_id: int, amount: float):
+        """Обновить статистику выводов пользователя"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                """UPDATE users 
+                   SET total_withdrawn = total_withdrawn + ? 
+                   WHERE user_id = ?""",
+                (amount, user_id)
             )
             await db.commit()
 

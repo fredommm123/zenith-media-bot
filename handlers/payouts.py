@@ -173,16 +173,6 @@ async def request_payout_callback(callback: CallbackQuery, state: FSMContext):
     
     payout_amount = await calculate_payout_amount(views, platform, user_id, video_id)
     
-    # Минимальная сумма для выплаты (из config)
-    from core.config import MIN_WITHDRAWAL
-    if payout_amount < MIN_WITHDRAWAL:
-        await callback.answer(
-            f"❌ Минимальная сумма для выплаты: {MIN_WITHDRAWAL:.0f} ₽\n"
-            f"Ваша сумма: {payout_amount:.2f} ₽",
-            show_alert=True
-        )
-        return
-    
     # Конвертируем в USDT
     usdt_amount = await calculate_usdt_amount(payout_amount)
     
@@ -193,54 +183,103 @@ async def request_payout_callback(callback: CallbackQuery, state: FSMContext):
         )
         return
     
-    # Генерируем уникальный spend_id для идемпотентности
-    spend_id = f"video_{video_id}_{datetime.now().timestamp()}"
-    
-    # Создаем запрос на выплату в БД
-    payout_id = await db.create_payout_request(
-        user_id=user_id,
-        video_id=video_id,
-        amount_rub=payout_amount,
-        amount_usdt=usdt_amount,
-        spend_id=spend_id
-    )
-    
-    if not payout_id:
+    # Проверка минимума 1 USDT
+    if usdt_amount < 1.0:
         await callback.answer(
-            "❌ Ошибка создания запроса на выплату!",
+            f"❌ Минимальная сумма для вывода: 1 USDT\n"
+            f"Ваша сумма: {usdt_amount:.4f} USDT ({payout_amount:.2f} ₽)",
             show_alert=True
         )
         return
     
-    # Отправляем уведомление пользователю
-    await callback.message.answer(
-        f"✅ <b>Запрос на выплату создан!</b>\n\n"
-        f"🆔 ID запроса: <code>{payout_id}</code>\n"
-        f"💰 Сумма: <b>{payout_amount:.2f} ₽</b>\n"
-        f"💵 В USDT: <b>~{usdt_amount:.6f} USDT</b>\n\n"
-        f"📊 Видео ID: <code>{video_id}</code>\n"
-        f"👁 Просмотров: {views:,}\n\n"
-        f"⏳ Запрос отправлен администраторам.\n"
-        f"После одобрения деньги автоматически поступят на ваш @CryptoBot аккаунт.\n\n"
-        f"⚠️ <b>Важно:</b> У вас должен быть запущен @CryptoBot!",
+    # Генерируем уникальный spend_id для идемпотентности
+    spend_id = f"video_{video_id}_{datetime.now().timestamp()}"
+    
+    # Отправляем выплату напрямую через Crypto Bot
+    await callback.message.edit_text(
+        f"⏳ <b>Отправка выплаты...</b>\n\n"
+        f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+        f"📊 Видео ID: <code>{video_id}</code>",
         parse_mode="HTML"
     )
     
-    # Отправляем уведомление админам
-    notification_text = await format_payout_notification(
-        video_data=video,
+    # Получаем username пользователя для отправки
+    user = await db.get_user(user_id)
+    username = user.get('username') if user else callback.from_user.username
+    
+    if not username:
+        await callback.message.edit_text(
+            "❌ <b>Ошибка!</b>\n\n"
+            "У вас не установлен username в Telegram.\n"
+            "Установите username в настройках Telegram и попробуйте снова.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Отправляем платеж
+    payment_result = await send_payment(
         user_id=user_id,
-        username=callback.from_user.username or "no_username",
-        full_name=callback.from_user.full_name,
-        payout_amount=payout_amount,
-        usdt_amount=usdt_amount
+        username=username,
+        amount_usdt=usdt_amount,
+        spend_id=spend_id,
+        comment=f"Выплата за видео #{video_id}"
     )
     
-    await send_to_admin_chat(
-        callback.bot,
-        notification_text,
-        reply_markup=admin_payout_keyboard(payout_id)
-    )
+    if payment_result['success']:
+        # Обновляем статус видео
+        await db.update_video_status(video_id, "paid_out")
+        await db.update_video_earnings(video_id, payout_amount)
+        
+        # Обновляем статистику пользователя
+        await db.update_user_stats_withdrawal(user_id, payout_amount)
+        
+        # Успешная выплата
+        await callback.message.edit_text(
+            f"✅ <b>Выплата успешно отправлена!</b>\n\n"
+            f"💰 Сумма: <b>{payout_amount:.2f} ₽</b>\n"
+            f"💵 В USDT: <b>{usdt_amount:.6f} USDT</b>\n\n"
+            f"📊 Видео ID: <code>{video_id}</code>\n"
+            f"👁 Просмотров: {views:,}\n\n"
+            f"🎉 Деньги отправлены на ваш @CryptoBot аккаунт!\n"
+            f"Проверьте @CryptoBot - деньги уже там.",
+            parse_mode="HTML"
+        )
+        
+        # Уведомляем админов
+        await send_to_admin_chat(
+            callback.bot,
+            f"✅ <b>Автоматическая выплата выполнена</b>\n\n"
+            f"👤 Пользователь: {callback.from_user.full_name} (@{username})\n"
+            f"🆔 User ID: <code>{user_id}</code>\n"
+            f"📊 Video ID: <code>{video_id}</code>\n\n"
+            f"💰 Сумма: {payout_amount:.2f} ₽ ({usdt_amount:.6f} USDT)\n"
+            f"🔗 {video['video_url']}",
+            parse_mode="HTML"
+        )
+    else:
+        # Ошибка выплаты
+        error_msg = payment_result.get('error', 'Неизвестная ошибка')
+        
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка выплаты!</b>\n\n"
+            f"{error_msg}\n\n"
+            f"Попробуйте позже или обратитесь к администратору.",
+            parse_mode="HTML"
+        )
+        
+        # Уведомляем админов об ошибке
+        await send_to_admin_chat(
+            callback.bot,
+            f"⚠️ <b>Ошибка автоматической выплаты</b>\n\n"
+            f"👤 Пользователь: {callback.from_user.full_name} (@{username})\n"
+            f"🆔 User ID: <code>{user_id}</code>\n"
+            f"📊 Video ID: <code>{video_id}</code>\n\n"
+            f"💰 Сумма: {payout_amount:.2f} ₽ ({usdt_amount:.6f} USDT)\n"
+            f"❌ Ошибка: {error_msg}",
+            parse_mode="HTML"
+        )
+    
+    await callback.answer()
     
     await callback.answer("✅ Запрос отправлен!")
 
@@ -438,3 +477,133 @@ async def reject_payout_callback(callback: CallbackQuery):
         logger.error(f"Не удалось уведомить пользователя {payout['user_id']}: {e}")
     
     await callback.answer("✅ Выплата отклонена")
+
+
+@router.callback_query(F.data == "request_balance_payout")
+async def request_balance_payout_callback(callback: CallbackQuery):
+    """Запрос выплаты с баланса пользователя"""
+    
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден!", show_alert=True)
+        return
+    
+    balance = user['balance']
+    
+    if balance <= 0:
+        await callback.answer(
+            "❌ Ваш баланс пуст!\nЗарабатывайте, отправляя видео.",
+            show_alert=True
+        )
+        return
+    
+    # Конвертируем баланс в USDT
+    from core.crypto_pay import get_exchange_rate_rub_to_usdt
+    rate = await get_exchange_rate_rub_to_usdt()
+    
+    if not rate:
+        await callback.answer(
+            "❌ Ошибка получения курса валют. Попробуйте позже.",
+            show_alert=True
+        )
+        return
+    
+    usdt_amount = balance / rate
+    
+    # Проверка минимума 1 USDT
+    if usdt_amount < 1.0:
+        needed_rub = (1.0 - usdt_amount) * rate
+        await callback.answer(
+            f"❌ Минимум для вывода: 1 USDT (~{rate:.2f} ₽)\n\n"
+            f"Ваш баланс: {balance:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+            f"Осталось накопить: ~{needed_rub:.2f} ₽",
+            show_alert=True
+        )
+        return
+    
+    # Проверяем username
+    username = user.get('username') or callback.from_user.username
+    
+    if not username:
+        await callback.answer(
+            "❌ У вас не установлен username в Telegram!\n"
+            "Установите username в настройках и попробуйте снова.",
+            show_alert=True
+        )
+        return
+    
+    # Отправляем сообщение о начале выплаты
+    await callback.message.edit_text(
+        f"⏳ <b>Отправка выплаты...</b>\n\n"
+        f"💰 Сумма: {balance:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+        f"💳 С баланса аккаунта",
+        parse_mode="HTML"
+    )
+    
+    # Генерируем уникальный spend_id
+    spend_id = f"balance_{user_id}_{datetime.now().timestamp()}"
+    
+    # Отправляем платеж
+    payment_result = await send_payment(
+        user_id=user_id,
+        username=username,
+        amount_usdt=usdt_amount,
+        spend_id=spend_id,
+        comment=f"Выплата с баланса"
+    )
+    
+    if payment_result['success']:
+        # Обнуляем баланс пользователя
+        await db.update_user_balance(user_id, 0, operation='set')
+        
+        # Обновляем статистику выводов
+        await db.update_user_stats_withdrawal(user_id, balance)
+        
+        # Успешная выплата
+        await callback.message.edit_text(
+            f"✅ <b>Выплата успешно отправлена!</b>\n\n"
+            f"💰 Сумма: <b>{balance:.2f} ₽</b>\n"
+            f"💵 В USDT: <b>{usdt_amount:.6f} USDT</b>\n\n"
+            f"💳 Выплачено с баланса аккаунта\n"
+            f"💼 Новый баланс: <b>0.00 ₽</b>\n\n"
+            f"🎉 Деньги отправлены на ваш @CryptoBot аккаунт!\n"
+            f"Проверьте @CryptoBot - деньги уже там.",
+            parse_mode="HTML"
+        )
+        
+        # Уведомляем админов
+        await send_to_admin_chat(
+            callback.bot,
+            f"✅ <b>Автоматическая выплата с баланса</b>\n\n"
+            f"👤 Пользователь: {callback.from_user.full_name} (@{username})\n"
+            f"🆔 User ID: <code>{user_id}</code>\n\n"
+            f"💰 Сумма: {balance:.2f} ₽ ({usdt_amount:.6f} USDT)\n"
+            f"💳 С баланса аккаунта",
+            parse_mode="HTML"
+        )
+    else:
+        # Ошибка выплаты
+        error_msg = payment_result.get('error', 'Неизвестная ошибка')
+        
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка выплаты!</b>\n\n"
+            f"{error_msg}\n\n"
+            f"Ваш баланс не изменен: {balance:.2f} ₽\n"
+            f"Попробуйте позже или обратитесь к администратору.",
+            parse_mode="HTML"
+        )
+        
+        # Уведомляем админов об ошибке
+        await send_to_admin_chat(
+            callback.bot,
+            f"⚠️ <b>Ошибка выплаты с баланса</b>\n\n"
+            f"👤 Пользователь: {callback.from_user.full_name} (@{username})\n"
+            f"🆔 User ID: <code>{user_id}</code>\n\n"
+            f"💰 Сумма: {balance:.2f} ₽ ({usdt_amount:.6f} USDT)\n"
+            f"❌ Ошибка: {error_msg}",
+            parse_mode="HTML"
+        )
+    
+    await callback.answer()

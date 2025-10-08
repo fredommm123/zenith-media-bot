@@ -103,7 +103,7 @@ async def show_profile(message: Message):
         f"👤 Рефералов: {referral_stats['total_referrals']}"
     )
     
-    await message.answer(profile_text, reply_markup=profile_keyboard(has_tiktok=bool(tiktok), has_youtube=bool(youtube)), parse_mode="HTML")
+    await message.answer(profile_text, reply_markup=profile_keyboard(has_tiktok=bool(tiktok), has_youtube=bool(youtube), balance=user['balance']), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "back_to_profile")
@@ -156,7 +156,7 @@ async def back_to_profile(callback: CallbackQuery):
         f"👤 Рефералов: {referral_stats['total_referrals']}"
     )
     
-    await callback.message.answer(profile_text, reply_markup=profile_keyboard(has_tiktok=bool(tiktok), has_youtube=bool(youtube)), parse_mode="HTML")
+    await callback.message.answer(profile_text, reply_markup=profile_keyboard(has_tiktok=bool(tiktok), has_youtube=bool(youtube), balance=user['balance']), parse_mode="HTML")
     await callback.answer()
 
 

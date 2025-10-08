@@ -24,7 +24,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return keyboard
 
 
-def profile_keyboard(has_tiktok: bool = False, has_youtube: bool = False, balance: float = 0) -> InlineKeyboardMarkup:
+def profile_keyboard(has_tiktok: bool = False, has_youtube: bool = False) -> InlineKeyboardMarkup:
     """Клавиатура профиля"""
     builder = InlineKeyboardBuilder()
     
@@ -38,12 +38,6 @@ def profile_keyboard(has_tiktok: bool = False, has_youtube: bool = False, balanc
     if not has_youtube:
         builder.row(
             InlineKeyboardButton(text="📺 Привязать YouTube", callback_data="add_youtube")
-        )
-    
-    # Показываем кнопку "Запросить выплату" если баланс > 0
-    if balance > 0:
-        builder.row(
-            InlineKeyboardButton(text="💸 Запросить выплату", callback_data="request_balance_payout")
         )
     
     builder.row(

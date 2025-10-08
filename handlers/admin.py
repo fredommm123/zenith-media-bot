@@ -315,6 +315,7 @@ async def approve_video(callback: CallbackQuery):
         # Рассчитываем выплату
         from handlers.payouts import calculate_payout_amount
         from core.keyboards import video_payout_keyboard
+        from core.crypto_pay import get_exchange_rate_rub_to_usdt
         
         views = video['views']
         payout_amount = await calculate_payout_amount(views, platform, video['user_id'], video_id)
@@ -330,27 +331,80 @@ async def approve_video(callback: CallbackQuery):
             platform_name = "YouTube"
             formula_text = f"💵 Фиксированная выплата за видео"
         
-        # Уведомляем пользователя
-        try:
-            await callback.bot.send_message(
-                video['user_id'],
-                f"✅ <b>Ваше видео одобрено!</b>\n\n"
-                f"🆔 ID видео: <code>{video_id}</code>\n"
-                f"{platform_emoji} {platform_name}: <code>@{author}</code>\n"
-                f"🔗 {video['video_url']}\n\n"
-                f"📊 <b>Статистика:</b>\n"
-                f"👁 Просмотров: {views:,}\n"
-                f"❤️ Лайков: {video.get('likes', 0):,}\n"
-                f"💬 Комментариев: {video.get('comments', 0):,}\n\n"
-                f"💰 <b>Выплата:</b>\n"
-                f"💵 {payout_amount:.2f} ₽\n"
-                f"{formula_text}\n\n"
-                f"⬇️ Нажмите кнопку ниже для получения выплаты:",
-                reply_markup=video_payout_keyboard(video_id),
-                parse_mode="HTML"
-            )
-        except:
-            pass
+        # Конвертируем в USDT для проверки минимума
+        rate = await get_exchange_rate_rub_to_usdt()
+        usdt_amount = payout_amount / rate if rate else 0
+        
+        # Проверяем: если меньше 1 USDT - зачисляем на баланс, иначе - кнопка выплаты
+        if usdt_amount < 1.0:
+            # Зачисляем на баланс пользователя
+            await db.update_user_balance(video['user_id'], payout_amount, operation='add')
+            
+            # Получаем обновленный баланс
+            user = await db.get_user(video['user_id'])
+            new_balance = user['balance']
+            new_balance_usdt = new_balance / rate if rate else 0
+            
+            # Уведомляем пользователя
+            try:
+                message_text = (
+                    f"✅ <b>Ваше видео одобрено!</b>\n\n"
+                    f"🆔 ID видео: <code>{video_id}</code>\n"
+                    f"{platform_emoji} {platform_name}: <code>@{author}</code>\n"
+                    f"🔗 {video['video_url']}\n\n"
+                    f"📊 <b>Статистика:</b>\n"
+                    f"👁 Просмотров: {views:,}\n"
+                    f"❤️ Лайков: {video.get('likes', 0):,}\n"
+                    f"💬 Комментариев: {video.get('comments', 0):,}\n\n"
+                    f"💰 <b>Начислено:</b>\n"
+                    f"💵 {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+                    f"{formula_text}\n\n"
+                    f"💳 <b>Деньги зачислены на ваш баланс!</b>\n"
+                    f"💰 Текущий баланс: <b>{new_balance:.2f} ₽</b> (~{new_balance_usdt:.4f} USDT)\n\n"
+                )
+                
+                # Если баланс >= 1 USDT - добавляем информацию о возможности вывода
+                if new_balance_usdt >= 1.0:
+                    message_text += (
+                        f"✅ <b>Вы можете вывести деньги!</b>\n"
+                        f"Используйте команду /profile → 💸 Запросить выплату"
+                    )
+                else:
+                    needed_rub = (1.0 - new_balance_usdt) * rate
+                    message_text += (
+                        f"ℹ️ Минимум для вывода: <b>1 USDT</b>\n"
+                        f"Осталось накопить: <b>~{needed_rub:.2f} ₽</b>"
+                    )
+                
+                await callback.bot.send_message(
+                    video['user_id'],
+                    message_text,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления пользователю: {e}")
+        else:
+            # Выплата >= 1 USDT - отправляем кнопку запроса выплаты
+            try:
+                await callback.bot.send_message(
+                    video['user_id'],
+                    f"✅ <b>Ваше видео одобрено!</b>\n\n"
+                    f"🆔 ID видео: <code>{video_id}</code>\n"
+                    f"{platform_emoji} {platform_name}: <code>@{author}</code>\n"
+                    f"🔗 {video['video_url']}\n\n"
+                    f"📊 <b>Статистика:</b>\n"
+                    f"👁 Просмотров: {views:,}\n"
+                    f"❤️ Лайков: {video.get('likes', 0):,}\n"
+                    f"💬 Комментариев: {video.get('comments', 0):,}\n\n"
+                    f"💰 <b>Выплата:</b>\n"
+                    f"💵 {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+                    f"{formula_text}\n\n"
+                    f"⬇️ Нажмите кнопку ниже для получения выплаты:",
+                    reply_markup=video_payout_keyboard(video_id),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления пользователю: {e}")
     
     await callback.answer("✅ Видео одобрено!")
 
