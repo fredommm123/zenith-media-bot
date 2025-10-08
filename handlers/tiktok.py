@@ -204,15 +204,21 @@ async def get_tiktok_profile_bio(username: str) -> str:
                 # Переходим на страницу профиля с увеличенным таймаутом и другой стратегией
                 logger.info(f"🔗 Переход на {url}")
                 try:
-                    await page.goto(url, timeout=60000, wait_until='domcontentloaded')
-                    logger.info("✅ Страница загружена (domcontentloaded)")
+                    await page.goto(url, timeout=60000, wait_until='networkidle')
+                    logger.info("✅ Страница загружена (networkidle)")
                 except Exception as e:
-                    logger.warning(f"⚠️ domcontentloaded failed, trying load: {e}")
-                    await page.goto(url, timeout=60000, wait_until='load')
-                    logger.info("✅ Страница загружена (load)")
+                    logger.warning(f"⚠️ networkidle failed, trying domcontentloaded: {e}")
+                    try:
+                        await page.goto(url, timeout=60000, wait_until='domcontentloaded')
+                        logger.info("✅ Страница загружена (domcontentloaded)")
+                    except Exception as e2:
+                        logger.warning(f"⚠️ domcontentloaded failed, trying load: {e2}")
+                        await page.goto(url, timeout=60000, wait_until='load')
+                        logger.info("✅ Страница загружена (load)")
                 
-                # Ждем загрузки контента
-                await page.wait_for_timeout(2000)
+                # Ждем загрузки контента и JavaScript
+                logger.info("⏳ Ждём загрузки JavaScript (5 сек)")
+                await page.wait_for_timeout(5000)
                 
                 # Метод 1: Ищем через селекторы
                 bio_selectors = [
@@ -251,23 +257,71 @@ async def get_tiktok_profile_bio(username: str) -> str:
                     except Exception as e:
                         logger.debug(f"⚠️ JSON-LD не сработал: {e}")
                 
-                # Метод 3: Парсим весь HTML
+                # Метод 3: Ищем через JavaScript напрямую
+                if not bio_text:
+                    logger.info("🔍 Пробуем получить через JavaScript")
+                    try:
+                        bio_text = await page.evaluate('''() => {
+                            // Ищем через селекторы
+                            const selectors = [
+                                'h2[data-e2e="user-bio"]',
+                                'h2[data-e2e="user-subtitle"]',
+                                '[data-e2e="user-bio"]',
+                                'div[data-e2e="user-page"] h2',
+                                'h2'
+                            ];
+                            
+                            for (const selector of selectors) {
+                                const elements = document.querySelectorAll(selector);
+                                for (const el of elements) {
+                                    const text = el.innerText || el.textContent;
+                                    if (text && text.length > 5 && text.length < 500) {
+                                        return text.trim();
+                                    }
+                                }
+                            }
+                            return '';
+                        }''')
+                        if bio_text:
+                            logger.info(f"✅ Bio найдено через JavaScript: {bio_text[:50]}")
+                    except Exception as e:
+                        logger.debug(f"⚠️ JavaScript метод не сработал: {e}")
+                
+                # Метод 4: Парсим весь HTML
                 if not bio_text:
                     logger.info("🔍 Парсим весь HTML")
                     try:
                         html_content = await page.content()
                         soup = BeautifulSoup(html_content, 'html.parser')
                         
+                        # Сохраняем HTML в файл для отладки
+                        logger.info(f"💾 HTML размер: {len(html_content)} символов")
+                        
                         # Ищем все h2 теги
                         h2_tags = soup.find_all('h2')
                         logger.info(f"📝 Найдено {len(h2_tags)} h2 тегов")
                         for i, h2 in enumerate(h2_tags):
                             text = h2.get_text(strip=True)
-                            logger.debug(f"  h2[{i}]: {text[:50] if text else 'empty'}")
-                            if text and len(text) > 10 and len(text) < 500:
+                            if text:
+                                logger.info(f"  h2[{i}]: {text[:100]}")
+                            if text and len(text) > 5 and len(text) < 500:
                                 bio_text = text
                                 logger.info(f"✅ Bio найдено в h2[{i}]: {bio_text[:50]}")
                                 break
+                        
+                        # Если h2 не нашли, ищем любой текст похожий на био
+                        if not bio_text:
+                            logger.info("🔍 Ищем в div тегах")
+                            all_divs = soup.find_all('div')
+                            for div in all_divs:
+                                text = div.get_text(strip=True)
+                                # Ищем текст с кодом верификации
+                                if text and 'TG' in text and len(text) > 10 and len(text) < 100:
+                                    logger.info(f"📝 Возможное био в div: {text[:100]}")
+                                    if text.count('\n') == 0:  # Одна строка
+                                        bio_text = text
+                                        logger.info(f"✅ Bio найдено в div: {bio_text[:50]}")
+                                        break
                     except Exception as e:
                         logger.error(f"❌ Ошибка парсинга HTML: {e}")
                 

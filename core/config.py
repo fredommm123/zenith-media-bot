@@ -9,7 +9,7 @@ ADMIN_IDS = [int(admin_id) for admin_id in os.getenv("ADMIN_IDS", "").split(",")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0")) if os.getenv("ADMIN_CHAT_ID") else None  # ID чата для админов
 
 # Payment settings
-MIN_WITHDRAWAL = int(os.getenv("MIN_WITHDRAWAL", "100"))
+MIN_WITHDRAWAL = float(os.getenv("MIN_WITHDRAWAL", "30"))  # Минимальная сумма вывода в рублях
 REFERRAL_PERCENT = int(os.getenv("REFERRAL_PERCENT", "10"))
 
 # Crypto Pay settings

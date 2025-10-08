@@ -54,6 +54,7 @@ class Database:
                     platform TEXT DEFAULT 'tiktok',
                     video_url TEXT NOT NULL UNIQUE,
                     video_id TEXT UNIQUE,
+                    tiktok_video_id TEXT,
                     video_title TEXT,
                     video_author TEXT,
                     video_published_at TIMESTAMP,
@@ -70,6 +71,15 @@ class Database:
                     FOREIGN KEY (youtube_channel_id) REFERENCES youtube_channels(id)
                 )
             """)
+            
+            # Миграция: добавляем tiktok_video_id если его нет
+            try:
+                await db.execute("ALTER TABLE videos ADD COLUMN tiktok_video_id TEXT")
+                await db.commit()
+                logger.info("✅ Добавлена колонка tiktok_video_id")
+            except Exception as e:
+                # Колонка уже существует
+                pass
 
             # Таблица заявок на вывод
             await db.execute("""
