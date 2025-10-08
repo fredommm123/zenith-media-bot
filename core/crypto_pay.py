@@ -7,7 +7,7 @@ from decimal import Decimal
 from aiocryptopay import AioCryptoPay, Networks
 from aiocryptopay.models.transfer import Transfer
 from aiocryptopay.models.invoice import Invoice
-from config import CRYPTO_PAY_TOKEN, CRYPTO_PAY_TESTNET
+from core.config import CRYPTO_PAY_TOKEN, CRYPTO_PAY_TESTNET
 
 logger = logging.getLogger(__name__)
 
