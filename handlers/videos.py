@@ -6,61 +6,8 @@ import asyncio
 
 from core.database import Database
 from core.keyboards import (
-    canc        # Проверяем статус пользователя (Gold = автоодобрение)
-        user = await db.get_user(message.from_user.id)
-        is_gold = user and user.get('tier') == 'gold'
-        
-        if is_gold:
-            # Для GOLD пользователей - автоматическое одобрение
-            await db.update_video_status(saved_video_id, 'approved')
-            
-            # Рассчитываем выплату
-            from core.config import TIKTOK_RATE_PER_1000_VIEWS
-            earnings = (video_data['views'] / 1000) * TIKTOK_RATE_PER_1000_VIEWS
-            await db.update_video_earnings(saved_video_id, earnings)
-            
-            # Кнопка для получения выплаты
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            payout_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💰 Получить выплату", callback_data=f"get_payout_{saved_video_id}")]
-            ])
-            
-            await message.answer(
-                f"✅ <b>TikTok видео автоматически одобрено!</b>\n\n"
-                f"🆔 ID заявки: <code>{saved_video_id}</code>\n"
-                f"🎵 Автор: <code>@{video_data['author']}</code>\n"
-                f"📅 Опубликовано: {published_str}\n\n"
-                f"📊 <b>Статистика:</b>\n"
-                f"👁 Просмотры: {video_data['views']:,}\n"
-                f"❤️ Лайки: {video_data['likes']:,}\n"
-                f"💬 Комментарии: {video_data['comments']:,}\n"
-                f"🔄 Репосты: {video_data['shares']:,}\n"
-                f"⭐ Избранные: {video_data['favorites']:,}\n\n"
-                f"💰 <b>Выплата: {earnings:.2f} ₽</b>\n\n"
-                f"🌟 Статус GOLD - видео одобрено автоматически!",
-                reply_markup=payout_keyboard,
-                parse_mode="HTML"
-            )
-        else:
-            await message.answer(
-                f"✅ <b>TikTok видео успешно добавлено!</b>\n\n"
-                f"🆔 ID заявки: <code>{saved_video_id}</code>\n"
-                f"🎵 Автор: <code>@{video_data['author']}</code>\n"
-                f"📅 Опубликовано: {published_str}\n\n"
-                f"📊 <b>Статистика на момент подачи:</b>\n"
-                f"👁 Просмотры: {video_data['views']:,}\n"
-                f"❤️ Лайки: {video_data['likes']:,}\n"
-                f"💬 Комментарии: {video_data['comments']:,}\n"
-                f"🔄 Репосты: {video_data['shares']:,}\n"
-                f"⭐ Избранные: {video_data['favorites']:,}\n\n"
-                f"⏳ Заявка отправлена на модерацию.\n"
-                f"После одобрения начнется подсчет просмотров для выплат.",
-                parse_mode="HTML"
-            )
-        
-        # Уведомляем администраторов с кнопками управления
-        from core.keyboards import video_moderation_keyboard
-        from core.utils import send_to_admin_chatagination_keyboard
+    cancel_keyboard,
+    pagination_keyboard
 )
 from core.utils import format_currency, format_timestamp, get_status_emoji, get_status_text, calculate_pages
 from parsers.tiktok_parser import validate_tiktok_video, extract_tiktok_video_id
@@ -334,41 +281,24 @@ async def submit_video_url(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
         
-        # Уведомляем администраторов
+        # Уведомляем администраторов с кнопками управления
         from core.keyboards import video_moderation_keyboard
         from core.utils import send_to_admin_chat
         
-        if is_gold:
-            # Для GOLD - уведомление об автоодобрении
-            from core.config import TIKTOK_RATE_PER_1000_VIEWS
-            earnings = (video_data['views'] / 1000) * TIKTOK_RATE_PER_1000_VIEWS
-            await send_to_admin_chat(
-                message.bot,
-                f"🌟 <b>GOLD: Видео автоматически одобрено</b>\n\n"
-                f"� {message.from_user.full_name} (@{message.from_user.username})\n"
-                f"🆔 Video ID: <code>{saved_video_id}</code>\n\n"
-                f"🎵 TikTok: <code>@{video_data['author']}</code>\n"
-                f"📅 Опубликовано: {published_str}\n"
-                f"👁 Просмотры: {video_data['views']:,}\n"
-                f"💰 Выплата: {earnings:.2f} ₽\n"
-                f"🔗 {video_url}"
-            )
-        else:
-            # Для обычных - на модерацию
-            await send_to_admin_chat(
-                message.bot,
-                f"�🔔 <b>Новое TikTok видео на модерацию</b>\n\n"
-                f"👤 Пользователь: {message.from_user.full_name} (@{message.from_user.username})\n"
-                f"🆔 User ID: <code>{message.from_user.id}</code>\n"
-                f"🆔 Video ID: <code>{saved_video_id}</code>\n\n"
-                f"🎵 TikTok: <code>@{video_data['author']}</code>\n"
-                f"📅 Опубликовано: {published_str}\n"
-                f"🔗 Ссылка: {video_url}\n\n"
-                f"📊 Статистика:\n"
-                f"👁 {video_data['views']:,} | ❤️ {video_data['likes']:,} | "
-                f"💬 {video_data['comments']:,} | 🔄 {video_data['shares']:,}",
-                reply_markup=video_moderation_keyboard(saved_video_id)
-            )
+        await send_to_admin_chat(
+            message.bot,
+            f"🔔 <b>Новое TikTok видео на модерацию</b>\n\n"
+            f"👤 Пользователь: {message.from_user.full_name} (@{message.from_user.username})\n"
+            f"🆔 User ID: <code>{message.from_user.id}</code>\n"
+            f"🆔 Video ID: <code>{saved_video_id}</code>\n\n"
+            f"🎵 TikTok: <code>@{video_data['author']}</code>\n"
+            f"📅 Опубликовано: {published_str}\n"
+            f"🔗 Ссылка: {video_url}\n\n"
+            f"📊 Статистика:\n"
+            f"👁 {video_data['views']:,} | ❤️ {video_data['likes']:,} | "
+            f"💬 {video_data['comments']:,} | 🔄 {video_data['shares']:,}",
+            reply_markup=video_moderation_keyboard(saved_video_id)
+        )
         
         await state.clear()
         
@@ -481,89 +411,3 @@ async def history_pagination(callback: CallbackQuery):
     
     await callback.message.edit_text(history_text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("get_payout_"))
-async def process_auto_payout(callback: CallbackQuery):
-    """Автоматическая выплата для GOLD пользователей"""
-    video_id = int(callback.data.split("_")[2])
-    
-    # Получаем данные видео
-    video = await db.get_video(video_id)
-    if not video:
-        await callback.answer("❌ Видео не найдено", show_alert=True)
-        return
-    
-    # Проверяем владельца
-    if video['user_id'] != callback.from_user.id:
-        await callback.answer("❌ Это не ваше видео!", show_alert=True)
-        return
-    
-    # Проверяем статус пользователя
-    user = await db.get_user(callback.from_user.id)
-    if not user or user.get('tier') != 'gold':
-        await callback.answer("❌ Доступно только для GOLD статуса!", show_alert=True)
-        return
-    
-    # Проверяем статус видео
-    if video['status'] != 'approved':
-        await callback.answer("❌ Видео еще не одобрено!", show_alert=True)
-        return
-    
-    # Проверяем, не была ли уже выплата
-    if video['earnings'] <= 0:
-        await callback.answer("❌ Нет средств для выплаты!", show_alert=True)
-        return
-    
-    # Получаем способ оплаты (Crypto Pay)
-    from core.crypto_pay import crypto_pay_manager
-    
-    try:
-        # Конвертируем рубли в USDT (примерный курс 1 USDT = 95 RUB)
-        usdt_amount = video['earnings'] / 95.0
-        
-        # Минимальная выплата 0.1 USDT
-        if usdt_amount < 0.1:
-            await callback.answer(f"❌ Минимальная выплата 0.1 USDT (≈9.5₽). У вас: {usdt_amount:.4f} USDT", show_alert=True)
-            return
-        
-        # Создаем выплату через Crypto Bot
-        payout_result = await crypto_pay_manager.create_payout(
-            user_id=callback.from_user.id,
-            amount=usdt_amount
-        )
-        
-        if payout_result['success']:
-            # Обнуляем earnings для видео
-            await db.update_video_earnings(video_id, 0)
-            
-            # Обновляем статистику пользователя
-            await db.add_to_withdrawn(callback.from_user.id, video['earnings'])
-            
-            # Удаляем кнопку и обновляем сообщение
-            await callback.message.edit_text(
-                f"{callback.message.text}\n\n"
-                f"✅ <b>Выплата обработана!</b>\n"
-                f"💰 Сумма: {video['earnings']:.2f} ₽ ({usdt_amount:.4f} USDT)\n"
-                f"📱 Средства отправлены в Crypto Bot (@CryptoBot)",
-                parse_mode="HTML"
-            )
-            
-            # Уведомляем админов
-            from core.utils import send_to_admin_chat
-            await send_to_admin_chat(
-                callback.bot,
-                f"💰 <b>Автовыплата GOLD</b>\n\n"
-                f"👤 {callback.from_user.full_name} (@{callback.from_user.username})\n"
-                f"🆔 Video ID: <code>{video_id}</code>\n"
-                f"💰 Сумма: {video['earnings']:.2f} ₽ ({usdt_amount:.4f} USDT)\n"
-                f"✅ Выплата выполнена через Crypto Bot"
-            )
-            
-            await callback.answer("✅ Выплата отправлена!", show_alert=True)
-        else:
-            await callback.answer(f"❌ Ошибка выплаты: {payout_result.get('error', 'Неизвестная ошибка')}", show_alert=True)
-    
-    except Exception as e:
-        logger.error(f"Ошибка автовыплаты: {e}")
-        await callback.answer(f"❌ Ошибка: {str(e)[:100]}", show_alert=True)

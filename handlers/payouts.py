@@ -173,10 +173,11 @@ async def request_payout_callback(callback: CallbackQuery, state: FSMContext):
     
     payout_amount = await calculate_payout_amount(views, platform, user_id, video_id)
     
-    # Минимальная сумма для выплаты
-    if payout_amount < 10:
+    # Минимальная сумма для выплаты (из config)
+    from core.config import MIN_WITHDRAWAL
+    if payout_amount < MIN_WITHDRAWAL:
         await callback.answer(
-            f"❌ Минимальная сумма для выплаты: 10 ₽\n"
+            f"❌ Минимальная сумма для выплаты: {MIN_WITHDRAWAL:.0f} ₽\n"
             f"Ваша сумма: {payout_amount:.2f} ₽",
             show_alert=True
         )

@@ -92,12 +92,12 @@ async def send_payment(
                 "error": "Не удалось получить курс валют"
             }
         
-        # Минимальная сумма перевода ~1 USD
-        if usdt_amount < 1.0:
+        # Минимальная сумма перевода 0.1 USDT (Crypto Bot минимум)
+        if usdt_amount < 0.1:
             return {
                 "success": False,
                 "transfer": None,
-                "error": f"Сумма перевода слишком мала ({usdt_amount:.2f} USDT). Минимум ~1 USDT"
+                "error": f"Сумма перевода слишком мала ({usdt_amount:.4f} USDT). Минимум 0.1 USDT"
             }
         
         # Проверяем баланс перед отправкой

@@ -12,7 +12,11 @@ class Database:
 
     async def init_db(self):
         """Инициализация базы данных"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            # Включаем WAL режим для лучшей конкурентности
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд
+            await db.commit()
             # Таблица пользователей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -204,7 +208,7 @@ class Database:
     # === USER METHODS ===
     async def add_user(self, user_id: int, username: str, full_name: str, referrer_id: Optional[int] = None):
         """Добавить нового пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 await db.execute(
                     "INSERT INTO users (user_id, username, full_name, referrer_id) VALUES (?, ?, ?, ?)",
@@ -228,7 +232,7 @@ class Database:
 
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Получить данные пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM users WHERE user_id = ?", (user_id,)
@@ -238,7 +242,7 @@ class Database:
 
     async def update_user_balance(self, user_id: int, amount: float):
         """Обновить баланс пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 "UPDATE users SET balance = balance + ? WHERE user_id = ?",
                 (amount, user_id)
@@ -247,7 +251,7 @@ class Database:
 
     async def update_user_stats(self, user_id: int, videos: int = 0, views: int = 0):
         """Обновить статистику пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 """UPDATE users 
                    SET total_videos = total_videos + ?, 
@@ -260,7 +264,7 @@ class Database:
     # === CHANNEL METHODS ===
     async def add_channel(self, user_id: int, channel_id: str, channel_name: str):
         """Добавить канал"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 await db.execute(
                     "INSERT INTO channels (user_id, channel_id, channel_name) VALUES (?, ?, ?)",
@@ -273,7 +277,7 @@ class Database:
 
     async def get_user_channels(self, user_id: int) -> List[Dict[str, Any]]:
         """Получить каналы пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM channels WHERE user_id = ?", (user_id,)
@@ -283,7 +287,7 @@ class Database:
 
     async def update_channel_name(self, channel_id: int, new_name: str):
         """Обновить название канала"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 "UPDATE channels SET channel_name = ? WHERE id = ?",
                 (new_name, channel_id)
@@ -292,7 +296,7 @@ class Database:
 
     async def delete_channel(self, channel_id: int):
         """Удалить канал"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
             await db.commit()
 
@@ -302,7 +306,7 @@ class Database:
                        published_at: Optional[str] = None, views: int = 0, likes: int = 0,
                        comments: int = 0, shares: int = 0, favorites: int = 0):
         """Добавить видео с метаданными"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 cursor = await db.execute(
                     """INSERT INTO videos 
@@ -320,7 +324,7 @@ class Database:
     
     async def check_video_exists(self, video_url: str = None, video_id: str = None) -> bool:
         """Проверить, существует ли видео (по URL или TikTok ID)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             if video_url:
                 async with db.execute(
                     "SELECT COUNT(*) FROM videos WHERE video_url = ?", (video_url,)
@@ -337,7 +341,7 @@ class Database:
 
     async def get_user_videos(self, user_id: int, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
         """Получить видео пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT v.*, c.channel_name 
@@ -353,7 +357,7 @@ class Database:
 
     async def get_video_count(self, user_id: int) -> int:
         """Получить количество видео пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM videos WHERE user_id = ?", (user_id,)
             ) as cursor:
@@ -362,7 +366,7 @@ class Database:
 
     async def update_video_stats(self, video_id: int, views: int, earnings: float):
         """Обновить статистику видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 """UPDATE videos 
                    SET views = ?, earnings = ? 
@@ -373,7 +377,7 @@ class Database:
     
     async def get_video(self, video_id: int) -> Optional[Dict[str, Any]]:
         """Получить видео по ID"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM videos WHERE id = ?", (video_id,)
@@ -383,7 +387,7 @@ class Database:
     
     async def update_video_status(self, video_id: int, status: str):
         """Обновить статус видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 "UPDATE videos SET status = ? WHERE id = ?",
                 (status, video_id)
@@ -392,7 +396,7 @@ class Database:
 
     async def update_video_earnings(self, video_id: int, earnings: float):
         """Обновить сумму выплаты за видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 "UPDATE videos SET earnings = ? WHERE id = ?",
                 (earnings, video_id)
@@ -402,7 +406,7 @@ class Database:
     # === PAYMENT METHODS ===
     async def add_payment_method(self, user_id: int, method_type: str, details: str):
         """Добавить способ выплаты"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 "INSERT INTO payment_methods (user_id, method_type, details) VALUES (?, ?, ?)",
                 (user_id, method_type, details)
@@ -411,7 +415,7 @@ class Database:
 
     async def get_payment_methods(self, user_id: int) -> List[Dict[str, Any]]:
         """Получить способы выплаты"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM payment_methods WHERE user_id = ?", (user_id,)
@@ -421,7 +425,7 @@ class Database:
 
     async def delete_payment_method(self, method_id: int):
         """Удалить способ выплаты"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute("DELETE FROM payment_methods WHERE id = ?", (method_id,))
             await db.commit()
 
@@ -429,7 +433,7 @@ class Database:
     async def create_withdrawal_request(self, user_id: int, amount: float, 
                                        payment_method: str, payment_details: str):
         """Создать заявку на вывод"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             cursor = await db.execute(
                 """INSERT INTO withdrawal_requests 
                    (user_id, amount, payment_method, payment_details) 
@@ -442,7 +446,7 @@ class Database:
     async def get_withdrawal_requests(self, user_id: int, limit: int = 10, 
                                      offset: int = 0) -> List[Dict[str, Any]]:
         """Получить заявки на вывод пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT * FROM withdrawal_requests 
@@ -456,7 +460,7 @@ class Database:
 
     async def get_withdrawal_count(self, user_id: int) -> int:
         """Получить количество заявок на вывод"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM withdrawal_requests WHERE user_id = ?", (user_id,)
             ) as cursor:
@@ -465,7 +469,7 @@ class Database:
 
     async def process_withdrawal(self, request_id: int, success: bool):
         """Обработать заявку на вывод"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             status = "completed" if success else "rejected"
             await db.execute(
                 """UPDATE withdrawal_requests 
@@ -497,7 +501,7 @@ class Database:
     # === REFERRAL METHODS ===
     async def get_referrals(self, referrer_id: int) -> List[Dict[str, Any]]:
         """Получить рефералов пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT r.*, u.username, u.full_name 
@@ -511,7 +515,7 @@ class Database:
 
     async def get_referral_stats(self, referrer_id: int) -> Dict[str, Any]:
         """Получить статистику по рефералам"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT 
@@ -531,7 +535,7 @@ class Database:
 
     async def add_referral_earning(self, referrer_id: int, referred_id: int, amount: float):
         """Добавить заработок от реферала"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             # Обновляем таблицу рефералов
             await db.execute(
                 """UPDATE referrals 
@@ -554,7 +558,7 @@ class Database:
     # === ADMIN METHODS ===
     async def get_all_withdrawal_requests(self, status: str = "pending") -> List[Dict[str, Any]]:
         """Получить все заявки на вывод (для админа)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT wr.*, u.username, u.full_name 
@@ -569,7 +573,7 @@ class Database:
 
     async def get_stats(self) -> Dict[str, Any]:
         """Получить общую статистику (для админа)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             
             # Статистика пользователей
@@ -598,7 +602,7 @@ class Database:
     # === TIKTOK METHODS ===
     async def get_tiktok_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """Проверить, привязан ли TikTok аккаунт (по username)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             # Убираем @ и делаем поиск без учета регистра
             clean_username = username.strip().lstrip('@').lower()
@@ -614,7 +618,7 @@ class Database:
 
     async def get_user_tiktok(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Получить TikTok аккаунт пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM tiktok_accounts WHERE user_id = ?",
@@ -626,7 +630,7 @@ class Database:
     async def add_tiktok_account(self, user_id: int, username: str, url: str, 
                                  verification_code: str) -> Dict[str, Any]:
         """Добавить TikTok аккаунт (с проверкой уникальности)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 clean_username = username.strip().lstrip('@').lower()
                 
@@ -670,7 +674,7 @@ class Database:
 
     async def verify_tiktok_account(self, user_id: int) -> bool:
         """Верифицировать TikTok аккаунт пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 """UPDATE tiktok_accounts 
                    SET is_verified = 1, verified_at = CURRENT_TIMESTAMP
@@ -682,7 +686,7 @@ class Database:
 
     async def remove_tiktok_account(self, user_id: int) -> bool:
         """Удалить TikTok аккаунт пользователя (только админ)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             cursor = await db.execute(
                 "DELETE FROM tiktok_accounts WHERE user_id = ?",
                 (user_id,)
@@ -692,7 +696,7 @@ class Database:
 
     async def get_all_verified_tiktoks(self) -> List[Dict[str, Any]]:
         """Получить все верифицированные TikTok аккаунты (для админа)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT ta.*, u.username as telegram_username, u.full_name
@@ -707,7 +711,7 @@ class Database:
     # === YOUTUBE METHODS ===
     async def get_user_youtube(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Получить YouTube канал пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM youtube_channels WHERE user_id = ?",
@@ -718,7 +722,7 @@ class Database:
 
     async def get_youtube_by_channel_id(self, channel_id: str) -> Optional[Dict[str, Any]]:
         """Получить YouTube канал по channel_id"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM youtube_channels WHERE LOWER(channel_id) = LOWER(?)",
@@ -730,7 +734,7 @@ class Database:
     async def add_youtube_channel(self, user_id: int, channel_id: str, channel_handle: str, 
                                   channel_name: str, url: str, verification_code: str) -> Dict[str, Any]:
         """Добавить YouTube канал"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 # Проверяем, не занят ли уже этот channel_id
                 existing = await self.get_youtube_by_channel_id(channel_id)
@@ -773,7 +777,7 @@ class Database:
 
     async def verify_youtube_channel(self, user_id: int) -> bool:
         """Верифицировать YouTube канал пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 """UPDATE youtube_channels 
                    SET is_verified = 1, verified_at = CURRENT_TIMESTAMP
@@ -785,7 +789,7 @@ class Database:
 
     async def remove_youtube_channel(self, user_id: int) -> bool:
         """Удалить YouTube канал пользователя (только админ)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             cursor = await db.execute(
                 "DELETE FROM youtube_channels WHERE user_id = ?",
                 (user_id,)
@@ -795,7 +799,7 @@ class Database:
 
     async def get_all_verified_youtubes(self) -> List[Dict[str, Any]]:
         """Получить все верифицированные YouTube каналы (для админа)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT yc.*, u.username as telegram_username, u.full_name
@@ -813,7 +817,7 @@ class Database:
                                video_id: str, title: str, author: str, published_at: str,
                                views: int = 0, likes: int = 0, comments: int = 0) -> Optional[int]:
         """Добавить YouTube видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 cursor = await db.execute(
                     """INSERT INTO videos 
@@ -831,7 +835,7 @@ class Database:
 
     async def check_youtube_video_exists(self, video_url: str = None, video_id: str = None) -> bool:
         """Проверить, существует ли YouTube видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             if video_url:
                 async with db.execute(
                     "SELECT COUNT(*) FROM videos WHERE video_url = ? AND platform = 'youtube'",
@@ -850,7 +854,7 @@ class Database:
 
     async def get_user_youtube_videos(self, user_id: int, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
         """Получить YouTube видео пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT v.*, yc.channel_name 
@@ -866,7 +870,7 @@ class Database:
 
     async def get_youtube_video_count(self, user_id: int) -> int:
         """Получить количество YouTube видео пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM videos WHERE user_id = ? AND platform = 'youtube'",
                 (user_id,)
@@ -885,7 +889,7 @@ class Database:
         spend_id: str
     ) -> Optional[int]:
         """Создать запрос на выплату"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 cursor = await db.execute(
                     """INSERT INTO crypto_payouts 
@@ -907,7 +911,7 @@ class Database:
         admin_id: Optional[int] = None
     ) -> bool:
         """Обновить статус выплаты"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 if status == 'paid':
                     await db.execute(
@@ -931,7 +935,7 @@ class Database:
 
     async def get_payout_by_id(self, payout_id: int) -> Optional[Dict[str, Any]]:
         """Получить информацию о выплате"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM crypto_payouts WHERE id = ?",
@@ -942,7 +946,7 @@ class Database:
 
     async def get_user_payouts(self, user_id: int) -> List[Dict[str, Any]]:
         """Получить историю выплат пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT * FROM crypto_payouts 
@@ -955,7 +959,7 @@ class Database:
 
     async def set_youtube_rate(self, user_id: int, rate: float) -> bool:
         """Установить индивидуальную ставку для YouTube канала"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 await db.execute(
                     """UPDATE youtube_channels 
@@ -971,7 +975,7 @@ class Database:
 
     async def get_youtube_rate(self, user_id: int) -> Optional[float]:
         """Получить ставку для YouTube канала"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 "SELECT rate_per_1000_views FROM youtube_channels WHERE user_id = ?",
                 (user_id,)
@@ -981,7 +985,7 @@ class Database:
 
     async def get_video_with_details(self, video_id: int) -> Optional[Dict[str, Any]]:
         """Получить полную информацию о видео с данными канала"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             
             # Сначала получаем видео
@@ -1018,7 +1022,7 @@ class Database:
 
     async def set_user_tier(self, user_id: int, tier: str) -> bool:
         """Установить уровень пользователя (bronze/gold)"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             try:
                 await db.execute(
                     "UPDATE users SET tier = ? WHERE user_id = ?",
@@ -1032,7 +1036,7 @@ class Database:
 
     async def get_user_tier(self, user_id: int) -> str:
         """Получить уровень пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 "SELECT tier FROM users WHERE user_id = ?",
                 (user_id,)
@@ -1042,7 +1046,7 @@ class Database:
 
     async def check_first_youtube_video(self, user_id: int) -> bool:
         """Проверить, первое ли это YouTube видео пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 "SELECT COUNT(*) FROM videos WHERE user_id = ? AND platform = 'youtube'",
                 (user_id,)
@@ -1052,7 +1056,7 @@ class Database:
 
     async def get_last_youtube_video_time(self, user_id: int) -> Optional[str]:
         """Получить время последнего отправленного YouTube видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
                 """SELECT created_at FROM videos 
                    WHERE user_id = ? AND platform = 'youtube' 
@@ -1093,7 +1097,7 @@ class Database:
 
     async def get_user_youtube_rate(self, user_id: int) -> Optional[float]:
         """Получить фиксированную ставку пользователя за YouTube видео"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             # Получаем последнее одобренное видео с установленной выплатой
             async with db.execute(
                 """SELECT earnings FROM videos 
