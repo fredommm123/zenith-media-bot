@@ -1,6 +1,6 @@
 import aiosqlite
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,8 @@ class Database:
                     referral_earnings REAL DEFAULT 0,
                     tier TEXT DEFAULT 'bronze',
                     last_key_issued_at TIMESTAMP,
+                    blocked_until TIMESTAMP,
+                    free_key_claimed_at TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (referrer_id) REFERENCES users(user_id)
                 )
@@ -185,6 +187,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     key_value TEXT NOT NULL UNIQUE,
                     status TEXT DEFAULT 'available',
+                    is_free_promo INTEGER DEFAULT 0,
                     assigned_to INTEGER,
                     uploaded_by INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -201,6 +204,7 @@ class Database:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_tier ON users(tier)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_referrer_id ON users(referrer_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_blocked_until ON users(blocked_until)")
 
             await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)")
@@ -240,24 +244,51 @@ class Database:
             except Exception:
                 pass
 
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN blocked_until TIMESTAMP")
+                await db.commit()
+                logger.info("✅ Добавлена колонка blocked_until")
+            except Exception:
+                pass
+
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN free_key_claimed_at TIMESTAMP")
+                await db.commit()
+                logger.info("✅ Добавлена колонка free_key_claimed_at")
+            except Exception:
+                pass
+
+            try:
+                await db.execute("ALTER TABLE media_keys ADD COLUMN is_free_promo INTEGER DEFAULT 0")
+                await db.commit()
+                logger.info("✅ Добавлена колонка is_free_promo в media_keys")
+            except Exception:
+                pass
+
             await db.commit()
             logger.info("Database initialized successfully with optimized indexes")
 
     # === MEDIA KEY METHODS ===
-    async def add_media_keys(self, keys: List[str], uploaded_by: Optional[int] = None) -> int:
+    async def add_media_keys(
+        self,
+        keys: List[str],
+        uploaded_by: Optional[int] = None,
+        *,
+        is_free_promo: bool = False,
+    ) -> int:
         """Добавить список ключей"""
         if not keys:
             return 0
         inserted = 0
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
-            for key in keys:
-                key_value = key.strip()
+            for raw_key in keys:
+                key_value = raw_key.strip()
                 if not key_value:
                     continue
                 try:
                     await db.execute(
-                        "INSERT INTO media_keys (key_value, uploaded_by) VALUES (?, ?)",
-                        (key_value, uploaded_by)
+                        "INSERT INTO media_keys (key_value, uploaded_by, is_free_promo) VALUES (?, ?, ?)",
+                        (key_value, uploaded_by, 1 if is_free_promo else 0)
                     )
                     inserted += 1
                 except aiosqlite.IntegrityError:
@@ -265,21 +296,33 @@ class Database:
             await db.commit()
         return inserted
 
-    async def count_available_media_keys(self) -> int:
+    async def count_available_media_keys(self, *, free_only: bool = False) -> int:
         """Количество доступных ключей"""
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM media_keys WHERE status = 'available'"
+                """
+                SELECT COUNT(*)
+                FROM media_keys
+                WHERE status = 'available' AND is_free_promo = ?
+                """,
+                (1 if free_only else 0,),
             ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else 0
 
-    async def get_next_available_media_key(self) -> Optional[Dict[str, Any]]:
+    async def get_next_available_media_key(self, *, free_only: bool = False) -> Optional[Dict[str, Any]]:
         """Получить ближайший свободный ключ"""
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM media_keys WHERE status = 'available' ORDER BY created_at ASC LIMIT 1"
+                """
+                SELECT *
+                FROM media_keys
+                WHERE status = 'available' AND is_free_promo = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (1 if free_only else 0,),
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
@@ -289,10 +332,35 @@ class Database:
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             await db.execute(
                 """UPDATE media_keys
-                    SET status = 'assigned', assigned_to = ?, assigned_at = CURRENT_TIMESTAMP
-                    WHERE id = ?""",
+                        SET status = 'assigned', assigned_to = ?, assigned_at = CURRENT_TIMESTAMP
+                        WHERE id = ?""",
                 (user_id, key_id)
             )
+            await db.commit()
+
+    async def mark_media_key_status(
+        self,
+        key_id: int,
+        status: str,
+        *,
+        clear_assignment: bool = False,
+    ):
+        """Обновить статус ключа"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            if clear_assignment:
+                await db.execute(
+                    """
+                    UPDATE media_keys
+                    SET status = ?, assigned_to = NULL, assigned_at = NULL
+                    WHERE id = ?
+                    """,
+                    (status, key_id),
+                )
+            else:
+                await db.execute(
+                    "UPDATE media_keys SET status = ? WHERE id = ?",
+                    (status, key_id),
+                )
             await db.commit()
 
     async def update_user_last_key_issued(self, user_id: int, issued_at: Optional[datetime] = None):
@@ -303,6 +371,208 @@ class Database:
                 "UPDATE users SET last_key_issued_at = ? WHERE user_id = ?",
                 (issued_ts, user_id)
             )
+            await db.commit()
+
+    async def update_free_key_claim(self, user_id: int, *, claimed_at: Optional[datetime] = None):
+        ts = (claimed_at or datetime.utcnow()).isoformat()
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET free_key_claimed_at = ? WHERE user_id = ?",
+                (ts, user_id)
+            )
+            await db.commit()
+
+    async def clear_free_key_claim(self, user_id: int):
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET free_key_claimed_at = NULL WHERE user_id = ?",
+                (user_id,)
+            )
+            await db.commit()
+
+    async def set_user_block(self, user_id: int, days: int):
+        until = (datetime.utcnow() + timedelta(days=days)).isoformat()
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET blocked_until = ?, tier = 'banned' WHERE user_id = ?",
+                (until, user_id)
+            )
+            await db.commit()
+
+    async def clear_user_block(self, user_id: int):
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET blocked_until = NULL, tier = 'bronze' WHERE user_id = ?",
+                (user_id,)
+            )
+            await db.commit()
+
+    async def get_user_active_free_key(self, user_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT * FROM media_keys
+                WHERE assigned_to = ? AND is_free_promo = 1
+                ORDER BY assigned_at DESC
+                LIMIT 1
+                """,
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def get_users_free_key_progress(self) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT
+                    u.user_id,
+                    u.username,
+                    u.full_name,
+                    u.free_key_claimed_at,
+                    u.blocked_until,
+                    mk.id AS key_id,
+                    mk.key_value,
+                    mk.status AS key_status,
+                    mk.assigned_at,
+                    SUM(CASE WHEN v.platform = 'tiktok'
+                        AND v.status = 'approved'
+                        AND v.created_at BETWEEN u.free_key_claimed_at AND datetime(u.free_key_claimed_at, '+24 hours')
+                        THEN 1 ELSE 0 END) AS tiktok_videos,
+                    SUM(CASE WHEN v.platform = 'youtube'
+                        AND v.status = 'approved'
+                        AND v.created_at BETWEEN u.free_key_claimed_at AND datetime(u.free_key_claimed_at, '+24 hours')
+                        THEN 1 ELSE 0 END) AS youtube_videos
+                FROM users u
+                LEFT JOIN media_keys mk
+                    ON mk.assigned_to = u.user_id AND mk.is_free_promo = 1
+                LEFT JOIN videos v
+                    ON v.user_id = u.user_id
+                WHERE u.free_key_claimed_at IS NOT NULL
+                GROUP BY u.user_id, mk.id
+                """
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_user_free_key_progress(self, user_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute(
+                """
+                SELECT
+                    u.user_id,
+                    u.username,
+                    u.full_name,
+                    u.free_key_claimed_at,
+                    u.blocked_until,
+                    mk.id AS key_id,
+                    mk.key_value,
+                    mk.status AS key_status,
+                    mk.assigned_at
+                FROM users u
+                LEFT JOIN media_keys mk
+                    ON mk.assigned_to = u.user_id AND mk.is_free_promo = 1
+                WHERE u.user_id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ) as cursor:
+                info = await cursor.fetchone()
+
+            if not info or not info["free_key_claimed_at"]:
+                return None
+
+            claimed_raw: str = info["free_key_claimed_at"]
+            claimed_at = datetime.fromisoformat(claimed_raw.replace(" ", "T"))
+            deadline = claimed_at + timedelta(hours=24)
+
+            start_str = claimed_at.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = deadline.strftime("%Y-%m-%d %H:%M:%S")
+
+            async with db.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN platform = 'tiktok' AND status = 'approved'
+                        AND created_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS tiktok_videos,
+                    SUM(CASE WHEN platform = 'youtube' AND status = 'approved'
+                        AND created_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS youtube_videos
+                FROM videos
+                WHERE user_id = ?
+                """,
+                (start_str, end_str, start_str, end_str, user_id),
+            ) as cursor:
+                progress = await cursor.fetchone()
+
+            result = dict(info)
+            result["claimed_at"] = claimed_at.isoformat()
+            result["deadline"] = deadline.isoformat()
+            result["tiktok_videos"] = (progress["tiktok_videos"] or 0) if progress else 0
+            result["youtube_videos"] = (progress["youtube_videos"] or 0) if progress else 0
+            return result
+
+    async def has_user_claimed_free_key(self, user_id: int) -> bool:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            async with db.execute(
+                """
+                SELECT COUNT(*)
+                FROM media_keys
+                WHERE assigned_to = ? AND is_free_promo = 1
+                """,
+                (user_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return bool(row and row[0] > 0)
+
+    async def set_user_free_key_status(
+        self,
+        user_id: int,
+        *,
+        key_id: Optional[int],
+        status: str,
+        blocked_until: Optional[datetime] = None,
+        clear_claim: bool = False,
+    ):
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            async with db.execute("BEGIN"):
+                if key_id:
+                    if status == 'available':
+                        await db.execute(
+                            """
+                            UPDATE media_keys
+                            SET status = 'available', assigned_to = NULL, assigned_at = NULL
+                            WHERE id = ?
+                            """,
+                            (key_id,),
+                        )
+                    else:
+                        await db.execute(
+                            "UPDATE media_keys SET status = ? WHERE id = ?",
+                            (status, key_id),
+                        )
+
+                updates = []
+                params: List[Any] = []
+                if blocked_until is not None:
+                    updates.append("blocked_until = ?")
+                    params.append(
+                        blocked_until.isoformat() if isinstance(blocked_until, datetime) else blocked_until
+                    )
+                if clear_claim:
+                    updates.append("free_key_claimed_at = NULL")
+                if status == 'available':
+                    updates.append("tier = 'bronze'")
+                params.append(user_id)
+
+                if updates:
+                    await db.execute(
+                        f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?",
+                        params,
+                    )
+
             await db.commit()
 
     async def get_users_for_key_distribution(self, min_videos: int, days: int) -> List[Dict[str, Any]]:
@@ -316,6 +586,7 @@ class Database:
                 WHERE v.status = 'approved'
                   AND v.created_at >= datetime('now', ?)
                   AND (u.last_key_issued_at IS NULL OR u.last_key_issued_at <= datetime('now', ?))
+                  AND (u.blocked_until IS NULL OR u.blocked_until < datetime('now'))
                 GROUP BY u.user_id
                 HAVING videos_count >= ?
                 ORDER BY videos_count DESC, u.created_at ASC

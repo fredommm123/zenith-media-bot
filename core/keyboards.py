@@ -32,25 +32,32 @@ def main_menu_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     return keyboard
 
 
-def profile_keyboard(has_tiktok: bool = False, has_youtube: bool = False, balance: float = 0) -> InlineKeyboardMarkup:
+def profile_keyboard(
+    has_tiktok: bool = False,
+    has_youtube: bool = False,
+    balance: float = 0,
+) -> InlineKeyboardMarkup:
     """Клавиатура профиля"""
     builder = InlineKeyboardBuilder()
-    
-    # Показываем кнопку "Привязать TikTok" только если TikTok не привязан
+
     if not has_tiktok:
         builder.row(
             InlineKeyboardButton(text="🎵 Привязать TikTok", callback_data="add_tiktok")
         )
-    
-    # Показываем кнопку "Привязать YouTube" только если YouTube не привязан
+
     if not has_youtube:
         builder.row(
             InlineKeyboardButton(text="📺 Привязать YouTube", callback_data="add_youtube")
         )
-    
+
+    builder.row(
+        InlineKeyboardButton(text="🆓 Бесплатный ключ", callback_data="free_key_status")
+    )
+
     builder.row(
         InlineKeyboardButton(text=" Назад в меню", callback_data="back_to_menu")
     )
+
     return builder.as_markup()
 
 

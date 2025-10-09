@@ -1,0 +1,8 @@
+{
+  "vds_host": "185.176.94.108",
+  "vds_user": "root",
+  "vds_password": "lJ4tN4fY0jpN",
+  "remote_path": "/root/zenithmedia_bot",
+  "service_name": "zenithmedia_bot",
+  "python_path": "python3"
+}

@@ -85,6 +85,21 @@ async def show_profile(message: Message):
     bot_username = (await message.bot.me()).username
     referral_link = generate_referral_link(bot_username, message.from_user.id)
     
+    free_key_info = await db.get_user_free_key_progress(message.from_user.id)
+    free_key_text = "🆓 <b>Бесплатный ключ:</b> еще не запрошен"
+    if free_key_info:
+        claimed_at = free_key_info.get("claimed_at")
+        deadline = free_key_info.get("deadline")
+        tiktok_videos = free_key_info.get("tiktok_videos", 0)
+        youtube_videos = free_key_info.get("youtube_videos", 0)
+        status_icon = "✅" if tiktok_videos >= 2 or youtube_videos >= 1 else "⏳"
+        free_key_text = (
+            f"🆓 <b>Бесплатный ключ:</b> {status_icon}\n"
+            f"• Срок: до <code>{deadline}</code>\n"
+            f"• TikTok: {tiktok_videos}/2\n"
+            f"• YouTube: {youtube_videos}/1"
+        )
+
     profile_text = (
         f"👤 <b>Ваш профиль</b>\n\n"
         f"🎭 <b>Имя:</b> {user['full_name']}\n"
@@ -97,6 +112,7 @@ async def show_profile(message: Message):
         f"🎬 Роликов: {user['total_videos']}\n"
         f"👁 Общих просмотров: {user['total_views']:,}\n"
         f"📤 Выведено всего: {format_currency(user['total_withdrawn'])}\n\n"
+        f"{free_key_text}\n\n"
         f"💳 <b>Способы выплат:</b>\n{payment_text}\n\n"
         f"👥 <b>Реферальная программа:</b>\n"
         f"🔗 Ваша реферальная ссылка:\n<code>{referral_link}</code>\n"
@@ -138,6 +154,20 @@ async def back_to_profile(callback: CallbackQuery):
     bot_username = (await callback.bot.me()).username
     referral_link = generate_referral_link(bot_username, callback.from_user.id)
     
+    free_key_info = await db.get_user_free_key_progress(callback.from_user.id)
+    free_key_text = "🆓 <b>Бесплатный ключ:</b> еще не запрошен"
+    if free_key_info:
+        deadline = free_key_info.get("deadline")
+        tiktok_videos = free_key_info.get("tiktok_videos", 0)
+        youtube_videos = free_key_info.get("youtube_videos", 0)
+        status_icon = "✅" if tiktok_videos >= 2 or youtube_videos >= 1 else "⏳"
+        free_key_text = (
+            f"🆓 <b>Бесплатный ключ:</b> {status_icon}\n"
+            f"• Срок: до <code>{deadline}</code>\n"
+            f"• TikTok: {tiktok_videos}/2\n"
+            f"• YouTube: {youtube_videos}/1"
+        )
+
     profile_text = (
         f"👤 <b>Ваш профиль</b>\n\n"
         f"🎭 <b>Имя:</b> {user['full_name']}\n"
@@ -150,6 +180,7 @@ async def back_to_profile(callback: CallbackQuery):
         f"🎬 Роликов: {user['total_videos']}\n"
         f"👁 Общих просмотров: {user['total_views']:,}\n"
         f"📤 Выведено всего: {format_currency(user['total_withdrawn'])}\n\n"
+        f"{free_key_text}\n\n"
         f"💳 <b>Способы выплат:</b>\n{payment_text}\n\n"
         f"👥 <b>Реферальная программа:</b>\n"
         f"🔗 Ваша реферальная ссылка:\n<code>{referral_link}</code>\n"
@@ -187,3 +218,32 @@ async def back_to_menu(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "free_key_status")
+async def show_free_key_status(callback: CallbackQuery):
+    free_key_info = await db.get_user_free_key_progress(callback.from_user.id)
+
+    if not free_key_info:
+        has_claimed = await db.has_user_claimed_free_key(callback.from_user.id)
+        if has_claimed:
+            await callback.answer("🆓 Ключ уже запрошен или ожидает выдачи.", show_alert=True)
+        else:
+            await callback.answer("🆓 Бесплатный ключ доступен! Обратитесь к администратору для выдачи.", show_alert=True)
+        return
+
+    deadline = free_key_info.get("deadline")
+    tiktok_videos = free_key_info.get("tiktok_videos", 0)
+    youtube_videos = free_key_info.get("youtube_videos", 0)
+    status_icon = "✅" if tiktok_videos >= 2 or youtube_videos >= 1 else "⏳"
+
+    await callback.answer(
+        (
+            f"🆓 Бесплатный ключ\n"
+            f"Статус: {status_icon}\n"
+            f"Дедлайн: {deadline}\n"
+            f"TikTok: {tiktok_videos}/2\n"
+            f"YouTube: {youtube_videos}/1"
+        ),
+        show_alert=True,
+    )
