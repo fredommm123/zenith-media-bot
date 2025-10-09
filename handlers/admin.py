@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -12,6 +14,7 @@ from core import config
 
 router = Router()
 db = Database(config.DATABASE_PATH)
+logger = logging.getLogger(__name__)
 
 
 class BroadcastStates(StatesGroup):
@@ -308,100 +311,87 @@ async def approve_video(callback: CallbackQuery):
     views = video['views']
 
     from handlers.payouts import calculate_payout_amount
-    from core.crypto_pay import calculate_usdt_amount, send_payment
+    from core.crypto_pay import calculate_usdt_amount
 
     payout_amount = await calculate_payout_amount(views, platform, video['user_id'], video_id)
     usdt_amount = await calculate_usdt_amount(payout_amount)
     if not usdt_amount:
         usdt_amount = 0
 
-    # Проверяем сумму в USDT (для TikTok)
-    min_usdt_for_payout = 1.0  # Минимум 1 USDT для прямой выплаты
+    # ВСЕ пользователи (Gold и Bronze) получают деньги на баланс
+    username = user.get('username', f"user_{video['user_id']}") if user else f"user_{video['user_id']}"
+    tier_emoji = "🥇" if tier == "gold" else "🥉"
+    tier_name = "GOLD" if tier == "gold" else "BRONZE"
     
-    # Если TikTok и меньше 1$ - начисляем на баланс
-    if platform == 'tiktok' and usdt_amount < min_usdt_for_payout:
-        await db.update_video_status(video_id, "approved")
-        await db.update_user_balance(video['user_id'], payout_amount, operation='add')  # Начисляем на баланс
-        
-        await callback.message.edit_text(
-            f"✅ <b>Видео #{video_id} одобрено!</b>\n\n"
-            f"👤 Пользователь: ID {video['user_id']}\n"
-            f"📺 Автор: @{author}\n"
-            f"🎵 Платформа: TikTok\n"
-            f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
-            f"💼 Меньше 1$ - начислено на баланс",
-            parse_mode="HTML"
-        )
-        
-        await callback.bot.send_message(
-            video['user_id'],
-            f"✅ <b>Ваше TikTok видео одобрено!</b>\n\n"
-            f"🆔 ID видео: <code>{video_id}</code>\n"
-            f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
-            f"💼 <b>Начислено на баланс</b> (меньше 1$)\n"
-            f"Выводите с баланса от 1$ через кнопку \"💰 Вывод средств\"",
-            parse_mode="HTML"
-        )
-        await callback.answer("✅ Одобрено! Деньги на баланс")
-        return
+    # Одобряем видео и начисляем на баланс
+    await db.update_video_status(video_id, "approved")
     
-    # Для всех остальных случаев - прямая выплата
-    # Получаем username для платежа
-    username = user.get('username') if user else None
-    if not username:
-        username = f"user_{video['user_id']}"
+    # Начисляем на баланс пользователя
+    await db.update_user_balance(video['user_id'], payout_amount, operation='add')
     
-    # Генерируем spend_id
-    from datetime import datetime
-    spend_id = f"video_{video_id}_{datetime.now().timestamp()}"
+    # Начисляем реферальные бонусы (10% от выплаты)
+    referrer = await db.get_user(video['user_id'])
+    if referrer and referrer.get('referrer_id'):
+        referral_amount = payout_amount * 0.10
+        await db.add_referral_earning(
+            referrer_id=referrer['referrer_id'],
+            referred_id=video['user_id'],
+            amount=referral_amount
+        )
+        logger.info(f"Referral bonus {referral_amount:.2f} RUB credited to user {referrer['referrer_id']}")
     
-    if tier == 'gold':
-        # Gold-tier: автоматическая выплата
-        await db.update_video_status(video_id, "approved")
-        
-        payment_result = await send_payment(
-            user_id=video['user_id'],
-            username=username,
-            spend_id=spend_id,
-            amount_usdt=usdt_amount,
-            comment=f"Выплата за видео #{video_id}"
-        )
-        
-        if payment_result['success']:
-            await callback.bot.send_message(
-                video['user_id'],
-                f"✅ <b>Ваше видео одобрено!</b>\n\n"
-                f"🆔 ID видео: <code>{video_id}</code>\n"
-                f"🔗 {video['video_url']}\n\n"
-                f"💵 Выплата: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)",
-                parse_mode="HTML"
-            )
-            await callback.answer("✅ Видео одобрено и выплата отправлена!")
-        else:
-            await callback.answer(f"❌ Ошибка: {payment_result.get('error')}", show_alert=True)
-    else:
-        # Bronze-tier: только одобрение, БЕЗ автоматической выплаты
-        await db.update_video_status(video_id, "approved")
-        await callback.message.edit_text(
-            f"✅ <b>Видео #{video_id} одобрено!</b>\n\n"
-            f"👤 Пользователь: ID {video['user_id']}\n"
-            f"📺 Автор: @{author}\n"
-            f"🔗 {video['video_url']}\n\n"
-            f"💵 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
-            f"⏳ <b>Выплата НЕ отправлена!</b>\n"
-            f"Bronze пользователь должен запросить выплату кнопкой \"💰 Запросить выплату\"",
-            parse_mode="HTML"
-        )
-        await callback.bot.send_message(
-            video['user_id'],
-            f"✅ <b>Ваше видео одобрено!</b>\n\n"
-            f"🆔 ID видео: <code>{video_id}</code>\n"
-            f"🔗 {video['video_url']}\n\n"
-            f"💵 Начислено: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
-            f"💰 Для вывода нажмите кнопку \"💰 Запросить выплату\" в меню видео.",
-            parse_mode="HTML"
-        )
-        await callback.answer("✅ Видео одобрено!")
+    # Получаем новый баланс
+    updated_user = await db.get_user(video['user_id'])
+    new_balance = updated_user.get('balance', 0)
+    
+    await callback.message.edit_text(
+        f"✅ <b>Видео #{video_id} одобрено!</b>\n\n"
+        f"👤 Пользователь: ID {video['user_id']}\n"
+        f"📺 Автор: @{author}\n"
+        f"🔗 {video['video_url']}\n\n"
+        f"💵 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
+        f"✅ <b>Начислено на баланс!</b>\n"
+        f"💰 Новый баланс: {new_balance:.2f} ₽\n"
+        f"{tier_emoji} Tier: {tier_name}",
+        parse_mode="HTML"
+    )
+    
+    # Уведомление пользователю
+    await callback.bot.send_message(
+        video['user_id'],
+        f"🎉 <b>Поздравляем!</b>\n\n"
+        f"✅ Ваше видео одобрено!\n\n"
+        f"📹 <b>Видео ID:</b> <code>{video_id}</code>\n"
+        f"👁 <b>Просмотры:</b> {views:,}\n"
+        f"🔗 {video['video_url']}\n\n"
+        f"💵 <b>Начислено:</b> {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
+        f"💰 <b>Ваш баланс:</b> {new_balance:.2f} ₽\n\n"
+        f"Выводите через \"💰 Вывод средств\"",
+        parse_mode="HTML"
+    )
+    
+    # Уведомляем админов
+    from core.utils import send_to_admin_chat
+    await send_to_admin_chat(
+        callback.bot,
+        f"💰 <b>БАЛАНС ПОПОЛНЕН ({tier_name})</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Пользователь:</b>\n"
+        f"  • ID: {video['user_id']}\n"
+        f"  • Username: @{username}\n"
+        f"  • Tier: {tier_emoji} {tier_name}\n\n"
+        f"📹 <b>Видео:</b>\n"
+        f"  • ID: #{video_id}\n"
+        f"  • Платформа: {platform.upper()}\n"
+        f"  • Автор: @{author}\n"
+        f"  • Просмотры: {views:,}\n"
+        f"  • Ссылка: {video['video_url']}\n\n"
+        f"💰 <b>Начислено:</b> {payout_amount:.2f} ₽\n"
+        f"💼 <b>Новый баланс:</b> {new_balance:.2f} ₽",
+        parse_mode="HTML"
+    )
+    
+    await callback.answer("✅ Видео одобрено, деньги на баланс!")
 
 
 @router.callback_query(F.data == "admin_tiers")

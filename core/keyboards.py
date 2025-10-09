@@ -2,23 +2,31 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_menu_keyboard() -> ReplyKeyboardMarkup:
+def main_menu_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Главное меню"""
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="👤 Профиль"),
-                KeyboardButton(text="📜 История")
-            ],
-            [
-                KeyboardButton(text="🎬 Подать ролик"),
-                KeyboardButton(text="👥 Рефералы")
-            ],
-            [
-                KeyboardButton(text="💰 Вывод средств"),
-                KeyboardButton(text="📄 Оферта")
-            ]
+    keyboard_layout = [
+        [
+            KeyboardButton(text="👤 Профиль"),
+            KeyboardButton(text="📜 История")
         ],
+        [
+            KeyboardButton(text="🎬 Подать ролик"),
+            KeyboardButton(text="👥 Рефералы")
+        ],
+        [
+            KeyboardButton(text="💰 Вывод средств"),
+            KeyboardButton(text="📄 Оферта")
+        ]
+    ]
+    
+    # Добавляем кнопку админа для администраторов
+    if is_admin:
+        keyboard_layout.append([
+            KeyboardButton(text="👨‍💼 Админ-панель")
+        ])
+    
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=keyboard_layout,
         resize_keyboard=True
     )
     return keyboard
@@ -38,12 +46,6 @@ def profile_keyboard(has_tiktok: bool = False, has_youtube: bool = False, balanc
     if not has_youtube:
         builder.row(
             InlineKeyboardButton(text="📺 Привязать YouTube", callback_data="add_youtube")
-        )
-    
-    # Показываем кнопку "Запросить выплату" если баланс > 0
-    if balance > 0:
-        builder.row(
-            InlineKeyboardButton(text="💸 Запросить выплату", callback_data="request_balance_payout")
         )
     
     builder.row(
@@ -149,17 +151,6 @@ def withdrawal_keyboard(methods: list) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_menu")
     )
     return builder.as_markup()
-
-
-def cancel_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура отмены"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
-    )
-    return builder.as_markup()
-
-
 def tiktok_verification_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура подтверждения TikTok с кнопкой 'Поменял описание'"""
     builder = InlineKeyboardBuilder()
@@ -269,5 +260,91 @@ def video_payout_keyboard(video_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="💰 Запросить выплату", callback_data=f"request_payout_{video_id}")
+    )
+    return builder.as_markup()
+
+
+def admin_panel_keyboard() -> InlineKeyboardMarkup:
+    """Главное меню админ-панели"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📊 Общая аналитика", callback_data="admin_analytics")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🏆 Топ пользователей", callback_data="admin_top_users"),
+        InlineKeyboardButton(text="📹 Статистика видео", callback_data="admin_video_stats")
+    )
+    builder.row(
+        InlineKeyboardButton(text="👥 Управление юзерами", callback_data="admin_user_management"),
+        InlineKeyboardButton(text="💰 Финансы", callback_data="admin_finances")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎵 TikTok статистика", callback_data="admin_tiktok_stats"),
+        InlineKeyboardButton(text="📺 YouTube статистика", callback_data="admin_youtube_stats")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔑 Выдача ключей", callback_data="admin_media_keys")
+    )
+    return builder.as_markup()
+
+
+def admin_time_filter_keyboard(action: str) -> InlineKeyboardMarkup:
+    """Клавиатура выбора временного периода"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📅 Сегодня", callback_data=f"{action}_today"),
+        InlineKeyboardButton(text="📅 Вчера", callback_data=f"{action}_yesterday")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📅 Неделя", callback_data=f"{action}_week"),
+        InlineKeyboardButton(text="📅 Месяц", callback_data=f"{action}_month")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📅 Всё время", callback_data=f"{action}_all")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")
+    )
+    return builder.as_markup()
+
+
+def admin_user_actions_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Действия с пользователем"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_{user_id}"),
+        InlineKeyboardButton(text="✅ Разбанить", callback_data=f"admin_unban_{user_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="💸 Обнулить баланс", callback_data=f"admin_reset_balance_{user_id}"),
+        InlineKeyboardButton(text="🥇 Изменить тир", callback_data=f"admin_change_tier_{user_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📊 Статистика", callback_data=f"admin_user_stats_{user_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_user_management")
+    )
+    return builder.as_markup()
+
+
+def admin_media_keys_keyboard() -> InlineKeyboardMarkup:
+    """Меню управления ключами"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📥 Загрузить ключи", callback_data="admin_media_keys_upload"),
+        InlineKeyboardButton(text="📄 Последние выдачи", callback_data="admin_media_keys_recent")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")
+    )
+    return builder.as_markup()
+
+
+def cancel_keyboard(callback_data: str = "cancel") -> InlineKeyboardMarkup:
+    """Клавиатура отмены с настраиваемым callback"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data=callback_data)
     )
     return builder.as_markup()

@@ -254,82 +254,59 @@ async def receive_youtube_video_url(message: Message, state: FSMContext):
         user_tier = await db.get_user_tier(message.from_user.id)
         user_rate = await db.get_user_youtube_rate(message.from_user.id)
         
-        # Если пользователь Gold и у него уже есть ставка - автоматическая выплата
+        # Если пользователь Gold и у него уже есть ставка - автоматическое начисление
         if user_tier == 'gold' and user_rate and user_rate > 0:
-            # Автоматически одобряем видео и устанавливаем выплату
+            # Одобряем видео и сохраняем заработок
             await db.update_video_status(video_id, 'approved')
             await db.update_video_earnings(video_id, user_rate)
-            
-            # Автоматически выплачиваем
-            from core.crypto_pay import send_payment, calculate_usdt_amount
-            
-            # Отправляем платеж
-            payment_result = await send_payment(
-                user_id=message.from_user.id,
-                amount_rub=user_rate,
-                spend_id=f"youtube_auto_{video_id}"
+
+            # Начисляем на баланс
+            await db.update_user_balance(message.from_user.id, user_rate, operation='add')
+
+            # Реферальное вознаграждение (10%)
+            referrer = await db.get_user(message.from_user.id)
+            if referrer and referrer.get('referrer_id'):
+                referral_amount = user_rate * 0.10
+                await db.add_referral_earning(
+                    referrer_id=referrer['referrer_id'],
+                    referred_id=message.from_user.id,
+                    amount=referral_amount
+                )
+
+            updated_user = await db.get_user(message.from_user.id)
+            new_balance = updated_user.get('balance', 0)
+
+            # Обновляем сообщение пользователю
+            await progress_msg.edit_text(
+                f"🎉 <b>Видео автоматически одобрено!</b>\n\n"
+                f"🥇 <b>Ваш статус:</b> GOLD\n\n"
+                f"🎬 <b>Название:</b> {video_data['title'][:50]}{'...' if len(video_data['title']) > 50 else ''}\n"
+                f"📺 <b>Канал:</b> {video_data['channel_name']}\n"
+                f"📅 <b>Загружено:</b> {video_data['upload_date'].strftime('%d.%m.%Y %H:%M')}\n\n"
+                f"💰 <b>Начислено на баланс:</b> {user_rate:.2f}₽\n"
+                f"💼 <b>Текущий баланс:</b> {new_balance:.2f}₽\n\n"
+                f"Выводите через кнопку \"💰 Вывод средств\" в главном меню.",
+                parse_mode="HTML"
             )
-            
-            if payment_result['success']:
-                # Обновляем сообщение пользователю
-                await progress_msg.edit_text(
-                    f"🎉 <b>Видео автоматически одобрено и оплачено!</b>\n\n"
-                    f"🥇 <b>Ваш статус:</b> GOLD\n\n"
-                    f"🎬 <b>Название:</b> {video_data['title'][:50]}{'...' if len(video_data['title']) > 50 else ''}\n"
-                    f"📺 <b>Канал:</b> {video_data['channel_name']}\n"
-                    f"📅 <b>Загружено:</b> {video_data['upload_date'].strftime('%d.%m.%Y %H:%M')}\n\n"
-                    f"💰 <b>Выплата:</b> {user_rate:.2f}₽\n"
-                    f"💵 <b>В USDT:</b> {payment_result['usdt_amount']:.2f}\n\n"
-                    f"💳 <b>Выплата через @CryptoBot</b>\n"
-                    f"✅ Средства отправлены на ваш @CryptoBot кошелек!\n\n"
-                    f"ℹ️ <i>Для получения средств нужен аккаунт в @CryptoBot.\n"
-                    f"Если у вас еще нет аккаунта - просто напишите /start боту @CryptoBot</i>",
-                    parse_mode="HTML"
-                )
-                
-                # Уведомляем админ-чат
-                admin_text = (
-                    f"✅ <b>YouTube видео автоматически оплачено</b> (GOLD)\n\n"
-                    f"👤 <b>Пользователь:</b> {user['full_name']} (@{user['username'] or 'нет'})\n"
-                    f"🆔 <b>User ID:</b> <code>{message.from_user.id}</code>\n"
-                    f"🥇 <b>Статус:</b> GOLD\n\n"
-                    f"🎬 <b>Видео:</b> {video_data['title'][:50]}{'...' if len(video_data['title']) > 50 else ''}\n"
-                    f"📺 <b>Канал:</b> {video_data['channel_name']}\n"
-                    f"🔗 <b>Ссылка:</b> {url}\n\n"
-                    f"📊 <b>Статистика:</b>\n"
-                    f"👁 Просмотры: {video_data['view_count']:,}\n"
-                    f"👍 Лайки: {video_data['like_count']:,}\n"
-                    f"💬 Комментарии: {video_data['comment_count']:,}\n\n"
-                    f"💰 <b>Выплата:</b> {user_rate:.2f}₽\n"
-                    f"💵 <b>В USDT:</b> {payment_result['usdt_amount']:.2f}\n"
-                    f"✅ <b>Transfer ID:</b> {payment_result['transfer'].transfer_id if payment_result.get('transfer') else 'N/A'}"
-                )
-                await send_to_admin_chat(message.bot, admin_text)
-                return
-            else:
-                # Ошибка платежа - уведомляем пользователя
-                await progress_msg.edit_text(
-                    f"⚠️ <b>Видео одобрено, но ошибка выплаты</b>\n\n"
-                    f"🎬 <b>Видео:</b> {video_data['title'][:50]}{'...' if len(video_data['title']) > 50 else ''}\n\n"
-                    f"💰 <b>Сумма:</b> {user_rate:.2f}₽\n\n"
-                    f"❌ <b>Ошибка:</b> {payment_result['error']}\n\n"
-                    f"Обратитесь к администратору.",
-                    parse_mode="HTML"
-                )
-                
-                # Уведомляем админ-чат об ошибке
-                admin_text = (
-                    f"⚠️ <b>Ошибка автоматической выплаты!</b>\n\n"
-                    f"👤 <b>Пользователь:</b> {user['full_name']} (@{user['username'] or 'нет'})\n"
-                    f"🆔 <b>User ID:</b> <code>{message.from_user.id}</code>\n"
-                    f"🥇 <b>Статус:</b> GOLD\n\n"
-                    f"🎬 <b>Видео:</b> {video_data['title'][:50]}{'...' if len(video_data['title']) > 50 else ''}\n"
-                    f"🔗 <b>Ссылка:</b> {url}\n\n"
-                    f"💰 <b>Сумма:</b> {user_rate:.2f}₽\n\n"
-                    f"❌ <b>Ошибка Crypto Bot:</b>\n{payment_result['error']}"
-                )
-                await send_to_admin_chat(message.bot, admin_text)
-                return
+
+            # Уведомляем админ-чат
+            admin_text = (
+                f"✅ <b>YouTube видео автоматически одобрено</b> (GOLD)\n\n"
+                f"👤 <b>Пользователь:</b> {user['full_name']} (@{user['username'] or 'нет'})\n"
+                f"🆔 <b>User ID:</b> <code>{message.from_user.id}</code>\n"
+                f"🥇 <b>Статус:</b> GOLD\n\n"
+                f"🎬 <b>Видео:</b> {video_data['title'][:50]}{'...' if len(video_data['title']) > 50 else ''}\n"
+                f"📺 <b>Канал:</b> {video_data['channel_name']}\n"
+                f"🔗 <b>Ссылка:</b> {url}\n\n"
+                f"📊 <b>Статистика:</b>\n"
+                f"👁 Просмотры: {video_data['view_count']:,}\n"
+                f"👍 Лайки: {video_data['like_count']:,}\n"
+                f"💬 Комментарии: {video_data['comment_count']:,}\n\n"
+                f"💰 <b>Начислено на баланс:</b> {user_rate:.2f}₽\n"
+                f"💼 <b>Новый баланс:</b> {new_balance:.2f}₽"
+            )
+            await send_to_admin_chat(message.bot, admin_text)
+            return
         
         # Если не Gold или нет ставки - стандартная проверка админом
         is_first_video = await db.check_first_youtube_video(message.from_user.id)

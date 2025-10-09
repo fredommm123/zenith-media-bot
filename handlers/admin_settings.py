@@ -241,21 +241,35 @@ async def process_youtube_rate(message: Message, state: FSMContext):
             # Если не удалось обновить, отправляем новое
             await message.answer(updated_admin_text, parse_mode="HTML")
         
+        # Начисляем на баланс пользователя
+        await db.update_user_balance(user_id, amount, operation='add')
+        
+        # Начисляем реферальные бонусы (10% от выплаты)
+        if user and user.get('referrer_id'):
+            referral_amount = amount * 0.10
+            await db.add_referral_earning(
+                referrer_id=user['referrer_id'],
+                referred_id=user_id,
+                amount=referral_amount
+            )
+            logger.info(f"Referral bonus {referral_amount:.2f} RUB credited to user {user['referrer_id']}")
+        
+        # Получаем новый баланс
+        updated_user = await db.get_user(user_id)
+        new_balance = updated_user.get('balance', 0)
+        
         # Уведомляем пользователя
         try:
-            from core.keyboards import video_payout_keyboard
-            
             await message.bot.send_message(
                 user_id,
-                f"✅ Твое видео одобрено!\n\n"
+                f"✅ <b>Твое видео одобрено!</b>\n\n"
+                f"🆔 ID видео: <code>{video_id}</code>\n"
                 f"📺 {video.get('video_title', 'Видео')}\n"
                 f"👁 Просмотры: {video.get('views', 0):,}\n\n"
-                f"💰 Выплата за видео: {amount:.2f}₽\n\n"
-                f"💳 <b>Выплата через @CryptoBot</b>\n"
-                f"ℹ️ Для получения средств нужен аккаунт в @CryptoBot\n"
-                f"Если у вас еще нет аккаунта - просто напишите /start боту @CryptoBot\n\n"
-                f"⬇️ Нажми кнопку ниже для получения выплаты:",
-                reply_markup=video_payout_keyboard(video_id),
+                f"💵 Начислено: {amount:.2f} ₽\n\n"
+                f"💰 <b>Деньги на вашем балансе!</b>\n"
+                f"💼 Новый баланс: {new_balance:.2f} ₽\n\n"
+                f"Выводите через \"💰 Вывод средств\" (минимум от 1$)",
                 parse_mode="HTML"
             )
         except Exception as e:

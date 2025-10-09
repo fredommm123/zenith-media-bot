@@ -48,7 +48,8 @@ async def cmd_start(message: Message, state: FSMContext):
             "Выберите действие:"
         )
     
-    await message.answer(welcome_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    is_admin = message.from_user.id in config.ADMIN_IDS
+    await message.answer(welcome_text, reply_markup=main_menu_keyboard(is_admin=is_admin), parse_mode="HTML")
 
 
 @router.message(F.text == "👤 Профиль")
@@ -179,9 +180,10 @@ async def cancel_state(callback: CallbackQuery, state: FSMContext):
 async def back_to_menu(callback: CallbackQuery):
     """Вернуться в главное меню"""
     await callback.message.delete()
+    is_admin = callback.from_user.id in config.ADMIN_IDS
     await callback.message.answer(
         "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(is_admin=is_admin),
         parse_mode="HTML"
     )
     await callback.answer()

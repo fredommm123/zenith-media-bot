@@ -17,6 +17,331 @@ class Database:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд
             await db.commit()
+
+            # Таблица пользователей
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    full_name TEXT,
+                    balance REAL DEFAULT 0,
+                    total_videos INTEGER DEFAULT 0,
+                    total_views INTEGER DEFAULT 0,
+                    total_withdrawn REAL DEFAULT 0,
+                    referrer_id INTEGER,
+                    referral_earnings REAL DEFAULT 0,
+                    tier TEXT DEFAULT 'bronze',
+                    last_key_issued_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (referrer_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Таблица каналов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    channel_name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id),
+                    UNIQUE(user_id, channel_id)
+                )
+            """)
+
+            # Таблица роликов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS videos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    channel_id INTEGER,
+                    youtube_channel_id INTEGER,
+                    platform TEXT DEFAULT 'tiktok',
+                    video_url TEXT NOT NULL UNIQUE,
+                    video_id TEXT UNIQUE,
+                    tiktok_video_id TEXT,
+                    video_title TEXT,
+                    video_author TEXT,
+                    video_published_at TIMESTAMP,
+                    views INTEGER DEFAULT 0,
+                    likes INTEGER DEFAULT 0,
+                    comments INTEGER DEFAULT 0,
+                    shares INTEGER DEFAULT 0,
+                    favorites INTEGER DEFAULT 0,
+                    earnings REAL DEFAULT 0,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id),
+                    FOREIGN KEY (channel_id) REFERENCES channels(id),
+                    FOREIGN KEY (youtube_channel_id) REFERENCES youtube_channels(id)
+                )
+            """)
+
+            # Миграция: добавляем tiktok_video_id если его нет
+            try:
+                await db.execute("ALTER TABLE videos ADD COLUMN tiktok_video_id TEXT")
+                await db.commit()
+                logger.info("✅ Добавлена колонка tiktok_video_id")
+            except Exception:
+                pass
+
+            # Таблица заявок на вывод
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS withdrawal_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    amount REAL NOT NULL,
+                    payment_method TEXT NOT NULL,
+                    payment_details TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Таблица способов выплат
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS payment_methods (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    method_type TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Таблица рефералов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS referrals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    referrer_id INTEGER NOT NULL,
+                    referred_id INTEGER NOT NULL,
+                    earnings REAL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (referrer_id) REFERENCES users(user_id),
+                    FOREIGN KEY (referred_id) REFERENCES users(user_id),
+                    UNIQUE(referrer_id, referred_id)
+                )
+            """)
+
+            # Таблица TikTok аккаунтов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tiktok_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL UNIQUE,
+                    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    url TEXT NOT NULL,
+                    verification_code TEXT,
+                    is_verified INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    verified_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Таблица YouTube каналов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS youtube_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL UNIQUE,
+                    channel_id TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    channel_handle TEXT,
+                    channel_name TEXT,
+                    url TEXT NOT NULL,
+                    verification_code TEXT,
+                    is_verified INTEGER DEFAULT 0,
+                    rate_per_1000_views REAL DEFAULT 50.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    verified_at TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Таблица выплат через Crypto Pay
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS crypto_payouts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    video_id INTEGER NOT NULL,
+                    amount_rub REAL NOT NULL,
+                    amount_usdt REAL NOT NULL,
+                    spend_id TEXT NOT NULL UNIQUE,
+                    transfer_id TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    admin_id INTEGER,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id),
+                    FOREIGN KEY (video_id) REFERENCES videos(id)
+                )
+            """)
+
+            # Таблица ключей для медиапартнёров
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS media_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_value TEXT NOT NULL UNIQUE,
+                    status TEXT DEFAULT 'available',
+                    assigned_to INTEGER,
+                    uploaded_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    assigned_at TIMESTAMP,
+                    FOREIGN KEY (assigned_to) REFERENCES users(user_id),
+                    FOREIGN KEY (uploaded_by) REFERENCES users(user_id)
+                )
+            """)
+
+            # Индексы для оптимизации запросов
+            logger.info("Creating database indexes...")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_tier ON users(tier)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_referrer_id ON users(referrer_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_platform ON videos(platform)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_user_status ON videos(user_id, status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_platform_status ON videos(platform, status)")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_yt_channels_user_id ON youtube_channels(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_yt_channels_channel_id ON youtube_channels(channel_id)")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_user ON crypto_payouts(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_video ON crypto_payouts(video_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_status ON crypto_payouts(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_created_at ON crypto_payouts(created_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_user_status ON crypto_payouts(user_id, status)")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_tiktok_accounts_user_id ON tiktok_accounts(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_tiktok_accounts_username ON tiktok_accounts(username)")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals(referrer_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_referrals_referred_id ON referrals(referred_id)")
+
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_media_keys_status ON media_keys(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_media_keys_assigned_to ON media_keys(assigned_to)")
+
+            # Оптимизация настроек БД
+            await db.execute("PRAGMA cache_size=-10000")  # 10MB кэш
+            await db.execute("PRAGMA synchronous=NORMAL")
+            await db.execute("PRAGMA temp_store=MEMORY")
+
+            # Добавляем колонку для даты выдачи ключа (если ещё нет)
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN last_key_issued_at TIMESTAMP")
+                await db.commit()
+                logger.info("✅ Добавлена колонка last_key_issued_at")
+            except Exception:
+                pass
+
+            await db.commit()
+            logger.info("Database initialized successfully with optimized indexes")
+
+    # === MEDIA KEY METHODS ===
+    async def add_media_keys(self, keys: List[str], uploaded_by: Optional[int] = None) -> int:
+        """Добавить список ключей"""
+        if not keys:
+            return 0
+        inserted = 0
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            for key in keys:
+                key_value = key.strip()
+                if not key_value:
+                    continue
+                try:
+                    await db.execute(
+                        "INSERT INTO media_keys (key_value, uploaded_by) VALUES (?, ?)",
+                        (key_value, uploaded_by)
+                    )
+                    inserted += 1
+                except aiosqlite.IntegrityError:
+                    continue
+            await db.commit()
+        return inserted
+
+    async def count_available_media_keys(self) -> int:
+        """Количество доступных ключей"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM media_keys WHERE status = 'available'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def get_next_available_media_key(self) -> Optional[Dict[str, Any]]:
+        """Получить ближайший свободный ключ"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM media_keys WHERE status = 'available' ORDER BY created_at ASC LIMIT 1"
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    async def mark_media_key_assigned(self, key_id: int, user_id: int):
+        """Отметить ключ как выданный"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                """UPDATE media_keys
+                    SET status = 'assigned', assigned_to = ?, assigned_at = CURRENT_TIMESTAMP
+                    WHERE id = ?""",
+                (user_id, key_id)
+            )
+            await db.commit()
+
+    async def update_user_last_key_issued(self, user_id: int, issued_at: Optional[datetime] = None):
+        """Сохранить время последней выдачи ключа"""
+        issued_ts = (issued_at or datetime.utcnow()).isoformat()
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET last_key_issued_at = ? WHERE user_id = ?",
+                (issued_ts, user_id)
+            )
+            await db.commit()
+
+    async def get_users_for_key_distribution(self, min_videos: int, days: int) -> List[Dict[str, Any]]:
+        """Получить пользователей, выполнивших условие по видео за период"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            query = """
+                SELECT u.*, COUNT(v.id) AS videos_count
+                FROM users u
+                JOIN videos v ON v.user_id = u.user_id
+                WHERE v.status = 'approved'
+                  AND v.created_at >= datetime('now', ?)
+                  AND (u.last_key_issued_at IS NULL OR u.last_key_issued_at <= datetime('now', ?))
+                GROUP BY u.user_id
+                HAVING videos_count >= ?
+                ORDER BY videos_count DESC, u.created_at ASC
+            """
+            arg = f"-{days} days"
+            async with db.execute(query, (arg, arg, min_videos)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_recently_assigned_media_keys(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Последние выданные ключи"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT mk.*, u.username AS assigned_username
+                FROM media_keys mk
+                LEFT JOIN users u ON mk.assigned_to = u.user_id
+                WHERE mk.status = 'assigned'
+                ORDER BY mk.assigned_at DESC
+                LIMIT ?
+                """,
+                (limit,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
             # Таблица пользователей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -194,6 +519,21 @@ class Database:
                 )
             """)
 
+            # Таблица ключей для медиапартнёров
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS media_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_value TEXT NOT NULL UNIQUE,
+                    status TEXT DEFAULT 'available',
+                    assigned_to INTEGER,
+                    uploaded_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    assigned_at TIMESTAMP,
+                    FOREIGN KEY (assigned_to) REFERENCES users(user_id),
+                    FOREIGN KEY (uploaded_by) REFERENCES users(user_id)
+                )
+            """)
+
             # Индексы для оптимизации запросов
             logger.info("Creating database indexes...")
             
@@ -234,6 +574,14 @@ class Database:
             await db.execute("PRAGMA cache_size=-10000")  # 10MB кэш
             await db.execute("PRAGMA synchronous=NORMAL")
             await db.execute("PRAGMA temp_store=MEMORY")
+
+            # Добавляем колонку для даты выдачи ключа (если ещё нет)
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN last_key_issued_at TIMESTAMP")
+                await db.commit()
+                logger.info("✅ Добавлена колонка last_key_issued_at")
+            except Exception:
+                pass
 
             await db.commit()
             logger.info("Database initialized successfully with optimized indexes")
@@ -601,15 +949,16 @@ class Database:
     async def add_referral_earning(self, referrer_id: int, referred_id: int, amount: float):
         """Добавить заработок от реферала"""
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
-            # Обновляем таблицу рефералов
             await db.execute(
-                """UPDATE referrals 
-                   SET earnings = earnings + ? 
-                   WHERE referrer_id = ? AND referred_id = ?""",
-                (amount, referrer_id, referred_id)
+                """
+                INSERT INTO referrals (referrer_id, referred_id, earnings)
+                VALUES (?, ?, ?)
+                ON CONFLICT(referrer_id, referred_id)
+                DO UPDATE SET earnings = referrals.earnings + excluded.earnings
+                """,
+                (referrer_id, referred_id, amount)
             )
-            
-            # Обновляем баланс реферера
+
             await db.execute(
                 """UPDATE users 
                    SET balance = balance + ?, 
@@ -617,7 +966,7 @@ class Database:
                    WHERE user_id = ?""",
                 (amount, amount, referrer_id)
             )
-            
+
             await db.commit()
 
     # === ADMIN METHODS ===
@@ -1172,3 +1521,325 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else None
+
+    # === ADMIN ANALYTICS METHODS ===
+    async def get_admin_analytics(self, start_date, end_date) -> Dict[str, Any]:
+        """Получить общую аналитику для админа"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            stats = {}
+            start_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Пользователи
+            async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+                stats['total_users'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COUNT(*) FROM users WHERE created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['new_users'] = (await cursor.fetchone())[0]
+            
+            # Активные пользователи (с видео)
+            async with db.execute(
+                """SELECT COUNT(DISTINCT user_id) FROM videos 
+                   WHERE created_at BETWEEN ? AND ?""",
+                (start_str, end_str)
+            ) as cursor:
+                stats['active_users'] = (await cursor.fetchone())[0]
+            
+            # Видео
+            async with db.execute(
+                "SELECT COUNT(*) FROM videos WHERE created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['total_videos'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COUNT(*) FROM videos WHERE status = 'approved' AND created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['approved_videos'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COUNT(*) FROM videos WHERE status = 'pending' AND created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['pending_videos'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COUNT(*) FROM videos WHERE status = 'rejected' AND created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['rejected_videos'] = (await cursor.fetchone())[0]
+            
+            # Просмотры
+            async with db.execute(
+                "SELECT COALESCE(SUM(views), 0) FROM videos WHERE created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['total_views'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COALESCE(SUM(views), 0) FROM videos WHERE platform = 'tiktok' AND created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['tiktok_views'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COALESCE(SUM(views), 0) FROM videos WHERE platform = 'youtube' AND created_at BETWEEN ? AND ?",
+                (start_str, end_str)
+            ) as cursor:
+                stats['youtube_views'] = (await cursor.fetchone())[0]
+            
+            # Финансы (с автоматическим расчетом для TikTok)
+            async with db.execute(
+                """SELECT COALESCE(SUM(CASE 
+                       WHEN earnings > 0 THEN earnings
+                       WHEN platform = 'tiktok' THEN (views / 1000.0) * 65
+                       ELSE 0
+                   END), 0) 
+                   FROM videos 
+                   WHERE status = 'approved' AND created_at BETWEEN ? AND ?""",
+                (start_str, end_str)
+            ) as cursor:
+                stats['total_paid'] = (await cursor.fetchone())[0]
+            
+            stats['total_paid_usdt'] = stats['total_paid'] / 90.0  # Фикс курс
+            
+            async with db.execute("SELECT COALESCE(SUM(balance), 0) FROM users") as cursor:
+                stats['total_balance'] = (await cursor.fetchone())[0]
+            
+            async with db.execute("SELECT COALESCE(SUM(referral_earnings), 0) FROM users") as cursor:
+                stats['referral_earnings'] = (await cursor.fetchone())[0]
+            
+            # Средние показатели
+            stats['avg_videos_per_user'] = stats['total_videos'] / max(stats['total_users'], 1)
+            stats['avg_payout'] = stats['total_paid'] / max(stats['approved_videos'], 1)
+            stats['avg_views_per_video'] = stats['total_views'] / max(stats['total_videos'], 1)
+            
+            return stats
+
+    async def get_top_users(self, start_date, end_date, limit: int = 10) -> List[Dict[str, Any]]:
+        """Получить топ пользователей по просмотрам"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            start_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+            async with db.execute(
+                """SELECT 
+                       u.user_id, u.username, u.full_name, u.tier,
+                       COUNT(DISTINCT v.id) as video_count,
+                       COALESCE(SUM(v.views), 0) as total_views,
+                       COALESCE(SUM(CASE 
+                           WHEN v.earnings > 0 THEN v.earnings
+                           WHEN v.platform = 'tiktok' THEN (v.views / 1000.0) * 65
+                           ELSE 0
+                       END), 0) as total_earnings,
+                       (SELECT platform FROM videos 
+                        WHERE user_id = u.user_id AND status = 'approved'
+                        GROUP BY platform 
+                        ORDER BY COUNT(*) DESC 
+                        LIMIT 1) as main_platform
+                   FROM users u
+                   LEFT JOIN videos v ON u.user_id = v.user_id 
+                       AND v.created_at BETWEEN ? AND ?
+                       AND v.status = 'approved'
+                   GROUP BY u.user_id
+                   HAVING video_count > 0
+                   ORDER BY total_views DESC
+                   LIMIT ?""",
+                (start_str, end_str, limit)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_platform_stats(self, platform: str, start_date, end_date) -> Dict[str, Any]:
+        """Получить статистику по платформе"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            stats = {}
+            start_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+            
+            async with db.execute(
+                "SELECT COUNT(*) FROM videos WHERE platform = ? AND created_at BETWEEN ? AND ?",
+                (platform, start_str, end_str)
+            ) as cursor:
+                stats['total_videos'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COUNT(*) FROM videos WHERE platform = ? AND status = 'approved' AND created_at BETWEEN ? AND ?",
+                (platform, start_str, end_str)
+            ) as cursor:
+                stats['approved_videos'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                "SELECT COALESCE(SUM(views), 0) FROM videos WHERE platform = ? AND created_at BETWEEN ? AND ?",
+                (platform, start_str, end_str)
+            ) as cursor:
+                stats['total_views'] = (await cursor.fetchone())[0]
+            
+            # Выплаты с автоматическим расчетом
+            if platform == 'tiktok':
+                async with db.execute(
+                    """SELECT COALESCE(SUM(CASE 
+                           WHEN earnings > 0 THEN earnings
+                           ELSE (views / 1000.0) * 65
+                       END), 0) 
+                       FROM videos 
+                       WHERE platform = ? AND status = 'approved' AND created_at BETWEEN ? AND ?""",
+                    (platform, start_str, end_str)
+                ) as cursor:
+                    stats['total_paid'] = (await cursor.fetchone())[0]
+            else:  # youtube
+                async with db.execute(
+                    """SELECT COALESCE(SUM(CASE 
+                           WHEN earnings > 0 THEN earnings
+                           ELSE 50 * (views / 1000.0)
+                       END), 0)
+                       FROM videos
+                       WHERE platform = ? AND status = 'approved' AND created_at BETWEEN ? AND ?""",
+                    (platform, start_str, end_str)
+                ) as cursor:
+                    stats['total_paid'] = (await cursor.fetchone())[0]
+            
+            return stats
+
+    async def get_top_users_by_platform(self, platform: str, start_date, end_date, limit: int = 5) -> List[Dict[str, Any]]:
+        """Получить топ пользователей по платформе (сортировка по просмотрам)"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            start_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+            
+            if platform == 'tiktok':
+                async with db.execute(
+                    """SELECT 
+                           u.user_id, u.username, u.full_name,
+                           ta.username as tiktok_username,
+                           COALESCE(SUM(v.views), 0) as total_views,
+                           COALESCE(SUM(CASE 
+                               WHEN v.earnings > 0 THEN v.earnings
+                               ELSE (v.views / 1000.0) * 65
+                           END), 0) as total_earnings
+                       FROM users u
+                       LEFT JOIN videos v ON u.user_id = v.user_id 
+                           AND v.platform = 'tiktok' 
+                           AND v.status = 'approved'
+                           AND v.created_at BETWEEN ? AND ?
+                       LEFT JOIN tiktok_accounts ta ON u.user_id = ta.user_id
+                       GROUP BY u.user_id
+                       HAVING total_views > 0
+                       ORDER BY total_views DESC
+                       LIMIT ?""",
+                    (start_str, end_str, limit)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+            else:  # youtube
+                async with db.execute(
+                    """SELECT 
+                           u.user_id, u.username, u.full_name,
+                           yc.channel_name as youtube_channel,
+                           COALESCE(SUM(v.views), 0) as total_views,
+                           COALESCE(SUM(CASE 
+                               WHEN v.earnings > 0 THEN v.earnings
+                               ELSE 50 * (v.views / 1000.0)
+                           END), 0) as total_earnings
+                       FROM users u
+                       LEFT JOIN videos v ON u.user_id = v.user_id 
+                           AND v.platform = 'youtube' 
+                           AND v.status = 'approved'
+                           AND v.created_at BETWEEN ? AND ?
+                       LEFT JOIN youtube_channels yc ON u.user_id = yc.user_id
+                       GROUP BY u.user_id
+                       HAVING total_views > 0
+                       ORDER BY total_views DESC
+                       LIMIT ?""",
+                    (start_str, end_str, limit)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+
+    async def get_finances_stats(self, start_date, end_date) -> Dict[str, Any]:
+        """Получить финансовую статистику с автоматическим расчетом"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            stats = {}
+            start_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Общие выплаты (с автоматическим расчетом для TikTok)
+            async with db.execute(
+                """SELECT 
+                       COALESCE(SUM(CASE 
+                           WHEN earnings > 0 THEN earnings
+                           WHEN platform = 'tiktok' THEN (views / 1000.0) * 65
+                           ELSE 0
+                       END), 0) as total,
+                       COUNT(*) as count
+                   FROM videos 
+                   WHERE status = 'approved' AND created_at BETWEEN ? AND ?""",
+                (start_str, end_str)
+            ) as cursor:
+                row = await cursor.fetchone()
+                stats['total_paid'] = row[0]
+                stats['payout_count'] = row[1]
+            
+            stats['total_paid_usdt'] = stats['total_paid'] / 90.0
+            
+            # Балансы
+            async with db.execute("SELECT COALESCE(SUM(balance), 0) FROM users") as cursor:
+                stats['total_balance'] = (await cursor.fetchone())[0]
+            
+            async with db.execute("SELECT COALESCE(SUM(referral_earnings), 0) FROM users") as cursor:
+                stats['referral_earnings'] = (await cursor.fetchone())[0]
+            
+            # По платформам (с автоматическим расчетом)
+            async with db.execute(
+                """SELECT COALESCE(SUM(CASE 
+                       WHEN earnings > 0 THEN earnings
+                       ELSE (views / 1000.0) * 65
+                   END), 0) 
+                   FROM videos 
+                   WHERE platform = 'tiktok' AND status = 'approved' AND created_at BETWEEN ? AND ?""",
+                (start_str, end_str)
+            ) as cursor:
+                stats['tiktok_paid'] = (await cursor.fetchone())[0]
+            
+            async with db.execute(
+                """SELECT COALESCE(SUM(CASE 
+                       WHEN earnings > 0 THEN earnings
+                       ELSE 50 * (views / 1000.0)
+                   END), 0)
+                   FROM videos 
+                   WHERE platform = 'youtube' AND status = 'approved' AND created_at BETWEEN ? AND ?""",
+                (start_str, end_str)
+            ) as cursor:
+                stats['youtube_paid'] = (await cursor.fetchone())[0]
+            
+            # Средние показатели
+            stats['avg_payout'] = stats['total_paid'] / max(stats['payout_count'], 1)
+            
+            async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+                user_count = (await cursor.fetchone())[0]
+            stats['avg_per_user'] = stats['total_paid'] / max(user_count, 1)
+            
+            return stats
+
+    async def ban_user(self, user_id: int):
+        """Забанить пользователя"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET tier = 'banned' WHERE user_id = ?",
+                (user_id,)
+            )
+            await db.commit()
+
+    async def unban_user(self, user_id: int):
+        """Разбанить пользователя"""
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE users SET tier = 'bronze' WHERE user_id = ?",
+                (user_id,)
+            )
+            await db.commit()

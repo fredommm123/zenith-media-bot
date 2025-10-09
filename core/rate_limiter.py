@@ -143,9 +143,9 @@ class AdminRateLimitMiddleware(RateLimitMiddleware):
     
     def __init__(self, admin_ids: list):
         self.admin_ids = admin_ids
-        # Более мягкие ограничения для админов
+        # Ограничения для обычных пользователей (админы освобождены)
         super().__init__(
-            rate_limit=0.3,    # 0.3 секунды между запросами
+            rate_limit=0.5,    # 0.5 секунды между запросами
             max_requests=30,   # 30 запросов
             period=60          # за 60 секунд
         )

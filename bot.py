@@ -7,8 +7,21 @@ from typing import Callable, Dict, Any, Awaitable
 
 from core import config
 from core.database import Database
-from core.rate_limiter import RateLimitMiddleware
-from handlers import profile, videos, payments, referral, help, admin, tiktok, youtube, youtube_videos, payouts, admin_settings
+from core.rate_limiter import AdminRateLimitMiddleware
+from handlers import (
+    profile,
+    videos,
+    payments,
+    referral,
+    help,
+    admin,
+    admin_panel,
+    tiktok,
+    youtube,
+    youtube_videos,
+    payouts,
+    admin_settings,
+)
 from core.crypto_pay import test_crypto_connection, close_crypto_session
 from core.backup import backup_manager
 
@@ -48,12 +61,8 @@ async def main():
         logger.warning("⚠️ Crypto Pay API недоступен. Выплаты могут не работать!")
     
     # Регистрация middleware
-    # Rate limiting для защиты от спама
-    rate_limiter = RateLimitMiddleware(
-        rate_limit=1.0,    # 1 секунда между сообщениями
-        max_requests=10,   # 10 запросов
-        period=60          # за 60 секунд
-    )
+    # Rate limiting для защиты от спама (админы освобождены от лимитов)
+    rate_limiter = AdminRateLimitMiddleware(admin_ids=config.ADMIN_IDS)
     dp.update.outer_middleware(rate_limiter)
     dp.update.outer_middleware(user_registration_middleware)
     
@@ -64,11 +73,12 @@ async def main():
     dp.include_router(referral.router)
     dp.include_router(help.router)
     dp.include_router(admin.router)
-    dp.include_router(admin_settings.router)
+    dp.include_router(admin_panel.router)
     dp.include_router(tiktok.router)
     dp.include_router(youtube.router)
     dp.include_router(youtube_videos.router)
     dp.include_router(payouts.router)
+    dp.include_router(admin_settings.router)
     
     logger.info("Bot started")
     

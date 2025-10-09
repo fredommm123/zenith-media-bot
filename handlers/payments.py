@@ -1,10 +1,9 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
 
 from core.database import Database
 from core.utils import format_currency, send_to_admin_chat
-from core.crypto_pay import calculate_usdt_amount, send_payment
+from core.crypto_pay import calculate_usdt_amount, send_payment, get_exchange_rate_rub_to_usdt
 from core import config
 import logging
 
@@ -23,37 +22,25 @@ async def show_withdrawal_menu(message: Message):
     
     balance = user['balance']
     
-    # Проверка минимального баланса (1$ в рублях)
+    # Проверка минимального баланса (CryptoBot требует >=0.1 USDT)
     usdt_amount = await calculate_usdt_amount(balance)
-    min_usdt = 1.0
-    
-    if balance <= 0:
-        # Получаем курс для рассчета минимума в рублях
-        from core.crypto_pay import get_exchange_rate_rub_to_usdt
-        rate = await get_exchange_rate_rub_to_usdt()
-        min_rub = (1.0 / rate) if rate else 95.0  # примерно 95 рублей за 1 USDT
-        
+    if usdt_amount is None:
         await message.answer(
-            f"💼 <b>Вывод средств</b>\n\n"
-            f"💰 Ваш баланс: {format_currency(balance)}\n\n"
-            f"❌ Недостаточно средств для вывода\n"
-            f"Минимум для вывода: <b>{min_rub:.2f} ₽</b>",
+            "❌ Не удалось получить курс USDT. Попробуйте позже.",
             parse_mode="HTML"
         )
         return
+
+    min_usdt = 0.1
+    rate = await get_exchange_rate_rub_to_usdt()
+    min_rub = (min_usdt / rate) if rate else 9.0
     
-    if usdt_amount and usdt_amount < min_usdt:
-        # Рассчитываем минимум в рублях
-        from core.crypto_pay import get_exchange_rate_rub_to_usdt
-        rate = await get_exchange_rate_rub_to_usdt()
-        min_rub = (1.0 / rate) if rate else 95.0
-        
+    if balance <= 0 or usdt_amount < min_usdt:
         await message.answer(
             f"💼 <b>Вывод средств</b>\n\n"
             f"💰 Ваш баланс: {format_currency(balance)}\n"
             f"💵 В USDT: ~{usdt_amount:.4f} USDT\n\n"
-            f"⚠️ Минимум для вывода: <b>{min_rub:.2f} ₽</b>\n"
-            f"Продолжайте загружать видео для накопления!",
+            f"❌ Минимальная сумма для мгновенного вывода: <b>{min_rub:.2f} ₽</b> (~{min_usdt:.1f} USDT)",
             parse_mode="HTML"
         )
         return
@@ -67,8 +54,7 @@ async def show_withdrawal_menu(message: Message):
         f"💼 <b>Вывод средств с баланса</b>\n\n"
         f"💰 Доступно: {format_currency(balance)}\n"
         f"💵 В USDT: ~{usdt_amount:.4f} USDT\n\n"
-        f"✅ Минимум 1 USDT - можно выводить!\n"
-        f"Нажмите кнопку ниже для вывода:",
+        f"⚡ Выводим мгновенно на @CryptoBot после нажатия кнопки:",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -88,11 +74,20 @@ async def process_balance_withdrawal(callback: CallbackQuery):
         await callback.answer("❌ Недостаточно средств!", show_alert=True)
         return
     
-    # Конвертируем в USDT
+    # Конвертируем в USDT и проверяем минимум CryptoBot
     usdt_amount = await calculate_usdt_amount(balance)
-    
-    if not usdt_amount or usdt_amount < 1.0:
-        await callback.answer("❌ Минимум 1 USDT для вывода!", show_alert=True)
+    if usdt_amount is None:
+        await callback.answer("❌ Не удалось получить курс USDT. Попробуйте позже", show_alert=True)
+        return
+
+    min_usdt = 0.1
+    if usdt_amount < min_usdt:
+        rate = await get_exchange_rate_rub_to_usdt()
+        min_rub = (min_usdt / rate) if rate else 9.0
+        await callback.answer(
+            f"❌ Минимум для вывода: {min_usdt:.1f} USDT (~{min_rub:.2f} ₽)",
+            show_alert=True
+        )
         return
     
     await callback.message.edit_text(
@@ -116,34 +111,58 @@ async def process_balance_withdrawal(callback: CallbackQuery):
     
     if result['success']:
         # Списываем с баланса
-        await db.update_balance(callback.from_user.id, -balance)
+        await db.update_user_balance(callback.from_user.id, balance, operation='subtract')
         
         await callback.message.edit_text(
-            f"✅ <b>Выплата успешно выполнена!</b>\n\n"
+            f"✅ <b>Мгновенный вывод выполнен!</b>\n\n"
             f"💰 Сумма: {format_currency(balance)}\n"
-            f"💵 Получено: ~{usdt_amount:.4f} USDT\n\n"
-            f"💼 Деньги отправлены на ваш @CryptoBot аккаунт.\n"
-            f"Проверьте баланс в боте!",
+            f"💵 Отправлено: ~{usdt_amount:.4f} USDT\n\n"
+            f"⚡ Средства уже на вашем @CryptoBot аккаунте.",
             parse_mode="HTML"
         )
         
+        # Получаем статистику по видео для админа
+        videos = await db.get_user_videos(callback.from_user.id)
+        approved_videos = [v for v in videos if v['status'] == 'approved']
+        
+        videos_info = ""
+        for i, video in enumerate(approved_videos[:5], 1):  # Показываем последние 5
+            videos_info += (
+                f"\n{i}. [{video.get('platform', 'N/A').upper()}] "
+                f"{video.get('views', 0):,} 👁 - "
+                f"{video.get('video_url', 'нет ссылки')}"
+            )
+        
+        if len(approved_videos) > 5:
+            videos_info += f"\n... и еще {len(approved_videos) - 5} видео"
+        
         # Уведомляем админов
         await send_to_admin_chat(
-            f"💸 <b>Вывод с баланса</b>\n\n"
-            f"👤 Пользователь: {user['full_name']} (@{user.get('username', 'нет')})\n"
-            f"🆔 ID: {callback.from_user.id}\n"
-            f"💰 Сумма: {format_currency(balance)}\n"
-            f"💵 USDT: ~{usdt_amount:.4f}\n"
-            f"✅ Успешно"
+            callback.bot,
+            f"💸 <b>МГНОВЕННЫЙ ВЫВОД</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Пользователь:</b>\n"
+            f"  • Имя: {user['full_name']}\n"
+            f"  • Username: @{user.get('username', 'нет')}\n"
+            f"  • ID: {callback.from_user.id}\n\n"
+            f"💰 <b>Сумма вывода:</b> {format_currency(balance)} (~{usdt_amount:.4f} USDT)\n\n"
+            f"📊 <b>Статистика:</b>\n"
+            f"  • Всего видео: {len(videos)}\n"
+            f"  • Одобрено: {len(approved_videos)}\n"
+            f"  • Реферальный доход: {user.get('referral_earnings', 0):.2f} ₽\n"
+            f"📹 <b>Последние видео:</b>{videos_info}\n\n"
+            f"⚡ Средства отправлены автоматически",
+            parse_mode="HTML"
         )
         
         await callback.answer("✅ Выплата выполнена!")
     else:
+        error_msg = result.get('error', 'Неизвестная ошибка')
         await callback.message.edit_text(
-            f"❌ <b>Ошибка выплаты</b>\n\n"
-            f"⚠️ Причина: {result['error']}\n\n"
-            f"Обратитесь в поддержку",
+            f"❌ <b>Ошибка мгновенного вывода</b>\n\n"
+            f"⚠️ Причина: {error_msg}\n\n"
+            f"Попробуйте позже или обратитесь в поддержку.",
             parse_mode="HTML"
         )
         
-        await callback.answer(f"❌ {result['error']}", show_alert=True)
+        await callback.answer(f"❌ {error_msg}", show_alert=True)
