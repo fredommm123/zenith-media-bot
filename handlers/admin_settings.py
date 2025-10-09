@@ -111,7 +111,7 @@ async def cmd_set_tier(message: Message):
         
         if success:
             tier_emoji = "🥉" if tier == "bronze" else "🥇"
-            tier_desc = "24 часа" if tier == "bronze" else "моментальный"
+            tier_desc = "с одобрением админа" if tier == "bronze" else "автоматическая"
             
             await message.answer(
                 f"✅ Уровень установлен!\n\n"
@@ -340,7 +340,7 @@ async def cmd_get_tier(message: Message):
         
         tier = await db.get_user_tier(user_id)
         tier_emoji = "🥉" if tier == "bronze" else "🥇"
-        tier_desc = "24 часа" if tier == "bronze" else "моментальный"
+        tier_desc = "с одобрением админа" if tier == "bronze" else "автоматическая"
         
         await message.answer(
             f"📊 Информация об уровне\n\n"

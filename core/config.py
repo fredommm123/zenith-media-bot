@@ -13,12 +13,12 @@ MIN_WITHDRAWAL = float(os.getenv("MIN_WITHDRAWAL", "30"))  # Минимальн�
 REFERRAL_PERCENT = int(os.getenv("REFERRAL_PERCENT", "10"))
 
 # Crypto Pay settings
-CRYPTO_PAY_TOKEN = "470393:AAG7PA6bmGHxmXcpLbku4zM9gEtP1yGb8FU"
-CRYPTO_PAY_TESTNET = False  # False для основной сети, True для тестнета
+CRYPTO_PAY_TOKEN = os.getenv("CRYPTO_PAY_TOKEN")
+CRYPTO_PAY_TESTNET = os.getenv("CRYPTO_PAY_TESTNET", "false").lower() == "true"
 
-# Withdrawal rates (views per 1 RUB)
-TIKTOK_RATE_PER_1000_VIEWS = 65  # 65 рублей за 1000 просмотров TikTok
-DEFAULT_YOUTUBE_RATE_PER_1000_VIEWS = 50  # 50 рублей за 1000 просмотров YouTube (по умолчанию)
+# Withdrawal rates
+TIKTOK_RATE_PER_1000_VIEWS = 65  # 65 рублей за 1000 просмотров TikTok (фиксированная ставка)
+# YouTube: ставку устанавливает администратор индивидуально для каждого канала
 
 # Database
 DATABASE_PATH = "bot_database.db"

@@ -194,16 +194,49 @@ class Database:
                 )
             """)
 
-            # Индекс для быстрого поиска выплат
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_crypto_payouts_user ON crypto_payouts(user_id)"
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_crypto_payouts_video ON crypto_payouts(video_id)"
-            )
+            # Индексы для оптимизации запросов
+            logger.info("Creating database indexes...")
+            
+            # Индексы для users
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_balance ON users(balance)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_tier ON users(tier)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_referrer_id ON users(referrer_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)")
+            
+            # Индексы для videos
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_platform ON videos(platform)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_user_status ON videos(user_id, status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_videos_platform_status ON videos(platform, status)")
+            
+            # Индексы для youtube_channels
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_yt_channels_user_id ON youtube_channels(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_yt_channels_channel_id ON youtube_channels(channel_id)")
+            
+            # Индексы для crypto_payouts
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_user ON crypto_payouts(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_video ON crypto_payouts(video_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_status ON crypto_payouts(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_created_at ON crypto_payouts(created_at)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_crypto_payouts_user_status ON crypto_payouts(user_id, status)")
+            
+            # Индексы для tiktok_accounts
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_tiktok_accounts_user_id ON tiktok_accounts(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_tiktok_accounts_username ON tiktok_accounts(username)")
+            
+            # Индексы для referrals
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals(referrer_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_referrals_referred_id ON referrals(referred_id)")
+            
+            # Оптимизация настроек БД
+            await db.execute("PRAGMA cache_size=-10000")  # 10MB кэш
+            await db.execute("PRAGMA synchronous=NORMAL")
+            await db.execute("PRAGMA temp_store=MEMORY")
 
             await db.commit()
-            logger.info("Database initialized successfully")
+            logger.info("Database initialized successfully with optimized indexes")
 
     # === USER METHODS ===
     async def add_user(self, user_id: int, username: str, full_name: str, referrer_id: Optional[int] = None):
@@ -373,9 +406,12 @@ class Database:
         async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                """SELECT v.*, c.channel_name 
+                """SELECT v.*, 
+                          COALESCE(c.channel_name, yc.channel_name, ta.username, 'Канал') as channel_name
                    FROM videos v 
-                   JOIN channels c ON v.channel_id = c.id 
+                   LEFT JOIN channels c ON v.channel_id = c.id 
+                   LEFT JOIN youtube_channels yc ON v.youtube_channel_id = yc.id
+                   LEFT JOIN tiktok_accounts ta ON v.user_id = ta.user_id AND v.platform = 'tiktok'
                    WHERE v.user_id = ? 
                    ORDER BY v.created_at DESC 
                    LIMIT ? OFFSET ?""",

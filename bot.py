@@ -7,6 +7,7 @@ from typing import Callable, Dict, Any, Awaitable
 
 from core import config
 from core.database import Database
+from core.rate_limiter import RateLimitMiddleware
 from handlers import profile, videos, payments, referral, help, admin, tiktok, youtube, youtube_videos, payouts, admin_settings
 from core.crypto_pay import test_crypto_connection, close_crypto_session
 from core.backup import backup_manager
@@ -47,6 +48,13 @@ async def main():
         logger.warning("⚠️ Crypto Pay API недоступен. Выплаты могут не работать!")
     
     # Регистрация middleware
+    # Rate limiting для защиты от спама
+    rate_limiter = RateLimitMiddleware(
+        rate_limit=1.0,    # 1 секунда между сообщениями
+        max_requests=10,   # 10 запросов
+        period=60          # за 60 секунд
+    )
+    dp.update.outer_middleware(rate_limiter)
     dp.update.outer_middleware(user_registration_middleware)
     
     # Регистрация роутеров

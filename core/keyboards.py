@@ -16,7 +16,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="💰 Вывод средств"),
-                KeyboardButton(text="📘 Помощь")
+                KeyboardButton(text="📄 Оферта")
             ]
         ],
         resize_keyboard=True

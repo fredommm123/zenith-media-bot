@@ -33,22 +33,23 @@ async def calculate_payout_amount(views: int, platform: str, user_id: int = None
         float: Сумма в рублях
     """
     if platform == 'tiktok':
-        # TikTok: расчет по просмотрам - 65 рублей за 1000 просмотров
+        # TikTok: фиксированная ставка 65₽ за 1000 просмотров
         rate = config.TIKTOK_RATE_PER_1000_VIEWS
         amount = (views / 1000) * rate
         
     elif platform == 'youtube':
-        # YouTube: фиксированная ставка за видео (независимо от просмотров)
+        # YouTube: индивидуальная ставка, устанавливается админом
         if video_id:
             # Получаем сохраненную сумму для видео
             video = await db.get_video(video_id)
             if video and video.get('earnings', 0) > 0:
                 amount = video['earnings']
             else:
-                # Если не установлена, берем дефолт
-                amount = config.DEFAULT_YOUTUBE_RATE_PER_1000_VIEWS
+                # Если ставка не установлена админом - возвращаем 0
+                amount = 0
         else:
-            amount = config.DEFAULT_YOUTUBE_RATE_PER_1000_VIEWS
+            # Без video_id не можем определить ставку
+            amount = 0
     else:
         amount = 0
     
@@ -74,13 +75,13 @@ async def format_payout_notification(
     # Получаем уровень пользователя
     user_tier = await db.get_user_tier(user_id)
     tier_emoji = "🥉" if user_tier == "bronze" else "🥇"
-    tier_desc = "24ч задержка" if user_tier == "bronze" else "моментально"
+    tier_desc = "после одобрения админом" if user_tier == "bronze" else "автоматически"
     
     if video_data['platform'] == 'tiktok':
         channel_display = f"@{channel_info.get('username', 'неизвестен')}"
     else:
         channel_display = channel_info.get('channel_name', 'Неизвестен')
-        rate = channel_info.get('rate_per_1000_views', config.DEFAULT_YOUTUBE_RATE_PER_1000_VIEWS)
+        rate = channel_info.get('rate_per_1000_views', 0)  # Для YouTube админ должен установить ставку
     
     text = (
         f"💰 <b>Запрос на выплату</b>\n\n"
@@ -192,29 +193,73 @@ async def request_payout_callback(callback: CallbackQuery, state: FSMContext):
         )
         return
     
+    # Получаем tier пользователя
+    user = await db.get_user(user_id)
+    tier = user.get('tier', 'bronze') if user else 'bronze'
+    username = user.get('username') if user else callback.from_user.username
+    
+    # Если нет username, используем user_id
+    if not username:
+        username = f"user_{user_id}"
+    
+    # === BRONZE: Отправляем запрос админу ===
+    if tier == 'bronze':
+        await callback.message.edit_text(
+            f"📤 <b>Запрос на выплату отправлен!</b>\n\n"
+            f"🥉 <b>Ваш статус:</b> BRONZE\n"
+            f"💰 <b>Сумма:</b> {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+            f"📊 <b>Видео ID:</b> {video_id}\n\n"
+            f"⏳ Ожидайте одобрения администратора.\n"
+            f"Это может занять некоторое время.",
+            parse_mode="HTML"
+        )
+        
+        # Отправляем уведомление админу
+        from core.keyboards import InlineKeyboardMarkup, InlineKeyboardButton
+        admin_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Выплатить", callback_data=f"admin_payout_{video_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_reject_payout_{video_id}")
+            ]
+        ])
+        
+        from core.utils import send_to_admin_chat
+        await send_to_admin_chat(
+            f"💰 <b>Запрос на выплату (BRONZE)</b>\n\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Пользователь:</b>\n"
+            f"  • Имя: {user.get('full_name', 'Неизвестно')}\n"
+            f"  • Username: @{username}\n"
+            f"  • ID: {user_id}\n"
+            f"  • 🥉 Уровень: BRONZE\n\n"
+            f"🎬 <b>Видео:</b>\n"
+            f"  • ID: {video_id}\n"
+            f"  • URL: {video['video_url']}\n"
+            f"  • Платформа: {platform.upper()}\n"
+            f"  • Просмотры: {views:,}\n\n"
+            f"💸 <b>Выплата:</b>\n"
+            f"  • Сумма: {payout_amount:.2f} ₽\n"
+            f"  • В USDT: ~{usdt_amount:.4f} USDT\n\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⬇️ Выберите действие:",
+            keyboard=admin_keyboard
+        )
+        
+        await callback.answer("✅ Запрос отправлен админу!")
+        return
+    
+    # === GOLD: Автоматическая выплата ===
     # Генерируем уникальный spend_id для идемпотентности
     spend_id = f"video_{video_id}_{datetime.now().timestamp()}"
     
     # Отправляем выплату напрямую через Crypto Bot
     await callback.message.edit_text(
         f"⏳ <b>Отправка выплаты...</b>\n\n"
+        f"🥇 <b>Ваш статус:</b> GOLD (автоматическая выплата)\n"
         f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
         f"📊 Видео ID: <code>{video_id}</code>",
         parse_mode="HTML"
     )
-    
-    # Получаем username пользователя для отправки
-    user = await db.get_user(user_id)
-    username = user.get('username') if user else callback.from_user.username
-    
-    if not username:
-        await callback.message.edit_text(
-            "❌ <b>Ошибка!</b>\n\n"
-            "У вас не установлен username в Telegram.\n"
-            "Установите username в настройках Telegram и попробуйте снова.",
-            parse_mode="HTML"
-        )
-        return
     
     # Отправляем платеж
     payment_result = await send_payment(
@@ -309,24 +354,10 @@ async def approve_payout_callback(callback: CallbackQuery):
         )
         return
     
-    # Проверяем уровень пользователя
+    # Проверяем уровень пользователя (без задержки 24ч для bronze)
     user_tier = await db.get_user_tier(payout['user_id'])
     
-    if user_tier == 'bronze':
-        # Бронзовый уровень - проверяем, прошло ли 24 часа
-        payout_created = datetime.fromisoformat(payout['created_at'])
-        now = datetime.now()
-        hours_passed = (now - payout_created).total_seconds() / 3600
-        
-        if hours_passed < 24:
-            hours_left = 24 - hours_passed
-            await callback.answer(
-                f"⏳ Бронзовый уровень: вывод через 24 часа\n"
-                f"Осталось: {hours_left:.1f}ч",
-                show_alert=True
-            )
-            return
-    
+    # Для bronze и gold выплата происходит сразу после одобрения админом
     # Обновляем сообщение админа
     await callback.message.edit_text(
         f"{callback.message.text}\n\n"
@@ -523,16 +554,10 @@ async def request_balance_payout_callback(callback: CallbackQuery):
         )
         return
     
-    # Проверяем username
+    # Получаем username (если нет - используем user_id)
     username = user.get('username') or callback.from_user.username
-    
     if not username:
-        await callback.answer(
-            "❌ У вас не установлен username в Telegram!\n"
-            "Установите username в настройках и попробуйте снова.",
-            show_alert=True
-        )
-        return
+        username = f"user_{user_id}"
     
     # Отправляем сообщение о начале выплаты
     await callback.message.edit_text(
@@ -607,3 +632,150 @@ async def request_balance_payout_callback(callback: CallbackQuery):
         )
     
     await callback.answer()
+
+
+# ==========================================
+# АДМИНСКИЕ ОБРАБОТЧИКИ ДЛЯ BRONZE ВЫПЛАТ
+# ==========================================
+
+@router.callback_query(F.data.startswith("admin_payout_"))
+async def admin_approve_payout(callback: CallbackQuery):
+    """Админ одобряет выплату для Bronze пользователя"""
+    from core import config
+    
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("❌ Доступ запрещен!", show_alert=True)
+        return
+    
+    video_id = int(callback.data.split("_")[2])
+    
+    # Получаем информацию о видео
+    video = await db.get_video_with_details(video_id)
+    
+    if not video:
+        await callback.answer("❌ Видео не найдено!", show_alert=True)
+        return
+    
+    user_id = video['user_id']
+    views = video['views']
+    platform = video['platform']
+    
+    # Рассчитываем сумму
+    payout_amount = await calculate_payout_amount(views, platform, user_id, video_id)
+    usdt_amount = await calculate_usdt_amount(payout_amount)
+    
+    if not usdt_amount:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка!</b>\n\nНе удалось получить курс валют.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Получаем данные пользователя
+    user = await db.get_user(user_id)
+    username = user.get('username') if user else None
+    if not username:
+        username = f"user_{user_id}"
+    
+    # Генерируем spend_id
+    spend_id = f"video_{video_id}_{datetime.now().timestamp()}"
+    
+    # Отправляем выплату
+    await callback.message.edit_text(
+        f"⏳ <b>Отправка выплаты...</b>\n\n"
+        f"👤 Пользователь: {user_id}\n"
+        f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)",
+        parse_mode="HTML"
+    )
+    
+    payment_result = await send_payment(
+        user_id=user_id,
+        username=username,
+        amount_usdt=usdt_amount,
+        spend_id=spend_id,
+        comment=f"Выплата за видео #{video_id}"
+    )
+    
+    if payment_result['success']:
+        await callback.message.edit_text(
+            f"✅ <b>Выплата успешно отправлена!</b>\n\n"
+            f"👤 Пользователь: {user.get('full_name', 'Неизвестно')} (@{username})\n"
+            f"🆔 ID: {user_id}\n"
+            f"📊 Видео ID: {video_id}\n"
+            f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n\n"
+            f"✅ Деньги отправлены на @CryptoBot аккаунт пользователя.",
+            parse_mode="HTML"
+        )
+        
+        # Уведомляем пользователя
+        try:
+            await callback.bot.send_message(
+                user_id,
+                f"✅ <b>Выплата одобрена!</b>\n\n"
+                f"💰 Сумма: {payout_amount:.2f} ₽ (~{usdt_amount:.4f} USDT)\n"
+                f"📊 Видео ID: {video_id}\n\n"
+                f"💳 Деньги отправлены на ваш @CryptoBot аккаунт!\n"
+                f"Проверьте баланс в боте.",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+        
+        await callback.answer("✅ Выплата отправлена!")
+    else:
+        error_msg = payment_result.get('error', 'Неизвестная ошибка')
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка выплаты!</b>\n\n"
+            f"👤 Пользователь: {user_id}\n"
+            f"📊 Видео ID: {video_id}\n"
+            f"💰 Сумма: {payout_amount:.2f} ₽\n\n"
+            f"❌ Ошибка: {error_msg}",
+            parse_mode="HTML"
+        )
+        await callback.answer(f"❌ Ошибка: {error_msg}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("admin_reject_payout_"))
+async def admin_reject_payout(callback: CallbackQuery):
+    """Админ отклоняет выплату для Bronze пользователя"""
+    from core import config
+    
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("❌ Доступ запрещен!", show_alert=True)
+        return
+    
+    video_id = int(callback.data.split("_")[3])
+    
+    # Получаем информацию о видео
+    video = await db.get_video_with_details(video_id)
+    
+    if not video:
+        await callback.answer("❌ Видео не найдено!", show_alert=True)
+        return
+    
+    user_id = video['user_id']
+    user = await db.get_user(user_id)
+    
+    await callback.message.edit_text(
+        f"❌ <b>Выплата отклонена</b>\n\n"
+        f"👤 Пользователь: {user.get('full_name', 'Неизвестно')}\n"
+        f"🆔 ID: {user_id}\n"
+        f"📊 Видео ID: {video_id}\n\n"
+        f"Запрос на выплату был отклонен администратором.",
+        parse_mode="HTML"
+    )
+    
+    # Уведомляем пользователя
+    try:
+        await callback.bot.send_message(
+            user_id,
+            f"❌ <b>Запрос на выплату отклонен</b>\n\n"
+            f"📊 Видео ID: {video_id}\n\n"
+            f"Ваш запрос на выплату был отклонен администратором.\n"
+            f"Для получения дополнительной информации свяжитесь с поддержкой.",
+            parse_mode="HTML"
+        )
+    except:
+        pass
+    
+    await callback.answer("❌ Выплата отклонена")

@@ -1,0 +1,60 @@
+# Команды для загрузки изменений на VDS
+# Выполняйте по одной в PowerShell
+
+# ===== БАЗОВАЯ ДИРЕКТОРИЯ =====
+cd "c:\Users\dariu_2\OneDrive\Рабочий стол\zenithmedia_bot"
+
+# ===== CORE МОДУЛИ =====
+scp "core\config.py" root@185.176.94.108:/zenithmedia_bot/core/config.py
+scp "core\database.py" root@185.176.94.108:/zenithmedia_bot/core/database.py
+scp "core\rate_limiter.py" root@185.176.94.108:/zenithmedia_bot/core/rate_limiter.py
+scp "core\validators.py" root@185.176.94.108:/zenithmedia_bot/core/validators.py
+
+# ===== HANDLERS =====
+scp "handlers\payouts.py" root@185.176.94.108:/zenithmedia_bot/handlers/payouts.py
+scp "handlers\admin_settings.py" root@185.176.94.108:/zenithmedia_bot/handlers/admin_settings.py
+scp "handlers\admin.py" root@185.176.94.108:/zenithmedia_bot/handlers/admin.py
+scp "handlers\help.py" root@185.176.94.108:/zenithmedia_bot/handlers/help.py
+
+# ===== ОСНОВНЫЕ ФАЙЛЫ =====
+scp "bot.py" root@185.176.94.108:/zenithmedia_bot/bot.py
+
+# ===== СКРИПТЫ =====
+scp "scripts\optimize_database.py" root@185.176.94.108:/zenithmedia_bot/scripts/optimize_database.py
+
+# ===== КОНФИГУРАЦИЯ =====
+scp ".env.example" root@185.176.94.108:/zenithmedia_bot/.env.example
+
+# ===== ДОКУМЕНТАЦИЯ =====
+scp "docs\TIER_SYSTEM_GUIDE.md" root@185.176.94.108:/zenithmedia_bot/docs/TIER_SYSTEM_GUIDE.md
+scp "TIER_SYSTEM_UPDATE.md" root@185.176.94.108:/zenithmedia_bot/TIER_SYSTEM_UPDATE.md
+scp "SECURITY_AND_OPTIMIZATION_APPLIED.md" root@185.176.94.108:/zenithmedia_bot/SECURITY_AND_OPTIMIZATION_APPLIED.md
+
+# ===== ПЕРЕЗАПУСК БОТА =====
+ssh root@185.176.94.108 "systemctl restart zenithmedia-bot"
+
+# ===== ПРОВЕРКА ЛОГОВ =====
+ssh root@185.176.94.108 "journalctl -u zenithmedia-bot -n 30 --no-pager"
+
+# ===== ПРОВЕРКА СТАТУСА =====
+ssh root@185.176.94.108 "systemctl status zenithmedia-bot --no-pager"
+
+# ===== ВАЖНО! =====
+# 1. Проверьте что .env файл создан на VDS:
+#    ssh root@185.176.94.108 "cat /zenithmedia_bot/.env"
+#
+# 2. Если .env НЕТ, создайте его:
+#    ssh root@185.176.94.108
+#    cd /zenithmedia_bot
+#    cp .env.example .env
+#    nano .env
+#    # Заполните BOT_TOKEN, ADMIN_IDS, CRYPTO_PAY_TOKEN
+#
+# 3. Получите НОВЫЙ токен Crypto Bot (старый скомпрометирован):
+#    Откройте @CryptoBot -> Crypto Pay -> My Apps -> Create new app
+#    Скопируйте токен в .env
+#
+# 4. Запустите оптимизацию БД (опционально):
+#    ssh root@185.176.94.108
+#    cd /zenithmedia_bot
+#    python scripts/optimize_database.py

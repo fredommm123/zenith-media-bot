@@ -20,28 +20,17 @@ crypto = AioCryptoPay(
 
 async def get_exchange_rate_rub_to_usdt() -> Optional[float]:
     """
-    Получить курс RUB -> USDT
+    Получить курс RUB -> USDT (ФИКСИРОВАННЫЙ: 1 USDT = 90 RUB)
     
     Returns:
-        float: Курс (сколько USDT за 1 RUB) или None при ошибке
+        float: Курс (сколько USDT за 1 RUB)
     """
-    try:
-        rates = await crypto.get_exchange_rates()
-        
-        # Ищем курс USDT -> RUB
-        for rate in rates:
-            if rate.source == "USDT" and rate.target == "RUB":
-                # Если 1 USDT = 95 RUB, то 1 RUB = 1/95 USDT
-                usdt_per_rub = 1.0 / float(rate.rate)
-                logger.info(f"Текущий курс: 1 RUB = {usdt_per_rub:.6f} USDT (1 USDT = {rate.rate} RUB)")
-                return usdt_per_rub
-        
-        logger.error("Не найден курс USDT -> RUB")
-        return None
-        
-    except Exception as e:
-        logger.error(f"Ошибка получения курса валют: {e}")
-        return None
+    # ФИКСИРОВАННЫЙ КУРС: 1 USDT = 90 RUB
+    fixed_usdt_to_rub = 90.0
+    usdt_per_rub = 1.0 / fixed_usdt_to_rub  # 1 RUB = 0.0111... USDT
+    
+    logger.info(f"Фиксированный курс: 1 USDT = {fixed_usdt_to_rub} RUB (1 RUB = {usdt_per_rub:.6f} USDT)")
+    return usdt_per_rub
 
 
 async def calculate_usdt_amount(rub_amount: float) -> Optional[float]:
