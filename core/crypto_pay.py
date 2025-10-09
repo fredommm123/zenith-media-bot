@@ -65,8 +65,10 @@ async def calculate_usdt_amount(rub_amount: float) -> Optional[float]:
 
 async def send_payment(
     user_id: int,
-    amount_rub: float,
+    username: str,
     spend_id: str,
+    amount_rub: float = None,
+    amount_usdt: float = None,
     comment: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -74,22 +76,34 @@ async def send_payment(
     
     Args:
         user_id: Telegram ID пользователя
-        amount_rub: Сумма в рублях
+        username: Username пользователя в Telegram
         spend_id: Уникальный ID транзакции (для идемпотентности)
+        amount_rub: Сумма в рублях (будет конвертирована в USDT)
+        amount_usdt: Сумма в USDT (используется напрямую)
         comment: Комментарий к переводу
         
     Returns:
         dict: {"success": bool, "transfer": Transfer or None, "error": str or None}
     """
     try:
-        # Конвертируем рубли в USDT
-        usdt_amount = await calculate_usdt_amount(amount_rub)
-        
-        if usdt_amount is None:
+        # Определяем сумму в USDT
+        if amount_usdt is not None:
+            usdt_amount = amount_usdt
+        elif amount_rub is not None:
+            # Конвертируем рубли в USDT
+            usdt_amount = await calculate_usdt_amount(amount_rub)
+            
+            if usdt_amount is None:
+                return {
+                    "success": False,
+                    "transfer": None,
+                    "error": "Не удалось получить курс валют"
+                }
+        else:
             return {
                 "success": False,
                 "transfer": None,
-                "error": "Не удалось получить курс валют"
+                "error": "Не указана сумма (amount_rub или amount_usdt)"
             }
         
         # Минимальная сумма перевода 0.1 USDT (Crypto Bot минимум)
